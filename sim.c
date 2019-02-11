@@ -9,8 +9,9 @@
 void disassemble_program();
 
 /* Memory-mapped IO ports */
-#define INPUT_ADDRESS 0x800000
+#define INPUT_ADDRESS  0x800000
 #define OUTPUT_ADDRESS 0x400000
+				   
 
 /* IRQ connections */
 #define IRQ_NMI_DEVICE 7
@@ -21,8 +22,8 @@ void disassemble_program();
 #define OUTPUT_DEVICE_PERIOD 1
 
 /* ROM and RAM sizes */
-#define MAX_ROM 0xfff
-#define MAX_RAM 0xff
+#define MAX_ROM (256*1024)
+#define MAX_RAM (256*1024)
 
 
 /* Read/write macros */
@@ -496,12 +497,12 @@ static void dump_registers() {
 	//uint32_t d0 = m68k_get_reg(NULL, M68K_REG_D0);
 	const char *d_regnames[]={"d0","d1","d2","d3","d4","d5","d6","d7"};
 	const char *a_regnames[]={"a0","a1","a2","a3","a4","a5","a6","a7"};
-	for (int i=	M68K_REG_D0;i<M68K_REG_D7;i++) {
+	for (int i=	M68K_REG_D0;i<=M68K_REG_D7;i++) {
 		uint32_t reg = m68k_get_reg(NULL, i);		
 		printf("%s: $%.8x, ",d_regnames[i - M68K_REG_D0], reg);
 	}	
 	printf("\n");
-	for (int i=	M68K_REG_A0;i<M68K_REG_A7;i++) {
+	for (int i=	M68K_REG_A0;i<=M68K_REG_A7;i++) {
 		uint32_t reg = m68k_get_reg(NULL, i);		
 		printf("%s: $%.8x, ",a_regnames[i - M68K_REG_A0], reg);
 	}	
@@ -573,7 +574,10 @@ int main(int argc, char* argv[])
 	if(fread(&g_rom[8], 1, MAX_ROM+1, fhandle) <= 0)
 		exit_error("Error reading %s", argv[1]);
 
-	WRITE_LONG(g_rom, 0, 0);
+	// Layout:
+	//   0..4: offset stack pointer
+	//   4..8: offset program start (this just points to next)
+	WRITE_LONG(g_rom, 0, MAX_RAM);	// Stack at this RAM address
 	WRITE_LONG(g_rom, 4, 8);
 
 //	disassemble_program();
@@ -603,6 +607,17 @@ int main(int argc, char* argv[])
 		//m68k_execute(100000);
 		dump_registers();
 		disasm_next();
+		//
+		// TODO:
+		//  run_to <address>, run to specific address before breaking execution
+		//	break_at <address>, set break point at specific address (possible to load/save these from file)
+		//  reload, reload same binary - DONT change CPU states
+		//  step-back, step one (or more instructions) back
+		//  mem <address>,<len>  dump memory at address
+		//  fill <address>,<len>,<val>  fill memory at address
+		//  
+		//  and probably a bunch of other things...  but that would be a good start...
+		//
 
 		bExecute = FALSE;
 		fgets(buffer, 256, stdin);
