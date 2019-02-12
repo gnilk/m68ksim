@@ -20,7 +20,7 @@ set(CMAKE_BUILD_TYPE Debug)
 include_directories("${PROJECT_SOURCE_DIR}")
 
 # sim core 
-list(APPEND srcsim src/sim.cpp src/simulator.c src/m68kcpu.c src/m68kdasm.c)
+list(APPEND srcsim src/sim.cpp src/strutil.cpp src/simulator.c src/m68kcpu.c src/m68kdasm.c)
 # generated src
 list(APPEND srcsim_gen src/m68kops.c src/m68kopac.c src/m68kopdm.c src/m68kopnz.c)
 
@@ -33,6 +33,10 @@ list(APPEND srcasm src/hello.s)
 
 add_executable(generator ${srcgen})
 add_executable(sim ${srcsim} ${srcsim_gen})
+
+
+set_property(TARGET sim PROPERTY CXX_STANDARD 11)
+
 
 target_include_directories(generator PUBLIC ./include)
 target_include_directories(sim PRIVATE /usr/local/include)

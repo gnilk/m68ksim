@@ -2,11 +2,13 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <time.h>
+#include <string>
 #include <vector>
 #include "simulator.h"
 #include "sim.h"
 #include "m68k.h"
 #include "osd.h"
+#include "strutil.h"
 
 void disassemble_program();
 
@@ -45,21 +47,103 @@ void disassemble_program()
 	fflush(stdout);
 }
 
-static void dump_registers() {
-	//uint32_t d0 = m68k_get_reg(NULL, M68K_REG_D0);
-	const char *d_regnames[]={"d0","d1","d2","d3","d4","d5","d6","d7"};
-	const char *a_regnames[]={"a0","a1","a2","a3","a4","a5","a6","a7"};
-	for (int i=	M68K_REG_D0;i<=M68K_REG_D7;i++) {
-		uint32_t reg = m68k_get_reg(NULL, (m68k_register_t)i);		
-		printf("%s: $%.8x, ",d_regnames[i - M68K_REG_D0], reg);
-	}	
+// see m68k.h - line: 93 for the enum declaration
+static const std::string glbRegnames[]={"d0","d1","d2","d3","d4","d5","d6","d7","a0","a1","a2","a3","a4","a5","a6","a7"};
+
+class Register {
+public:
+	Register(m68k_register_t _reg);
+	void Update();
+	const std::string &Name() const {
+		return glbRegnames[reg - (int)M68K_REG_D0];
+	}
+	std::string Value() {
+		return strutil::to_string(value);
+	}
+	bool IsChanged() {
+		return changed;
+	}
+public:
+	m68k_register_t reg;
+	uint32_t value;
+	uint32_t prev_value;
+	bool changed;
+
+};
+
+Register::Register(m68k_register_t _reg) :
+	reg(_reg) {
+
+}
+void Register::Update() {
+	prev_value = value;
+	value = m68k_get_reg(NULL, reg);
+	if (value != prev_value) {
+		changed = true;
+	} else {
+		changed = false;
+	}
+}
+
+
+class Registers {
+public:
+	Registers();
+	void Initialize();
+	void UpdateFromSimulator();
+	void Print();
+public:
+	std::vector<Register> dataRegisters;
+	std::vector<Register> addressRegisters;
+};
+
+Registers::Registers() {
+	Initialize();
+}
+void Registers::Initialize() {
+	dataRegisters.push_back(Register(M68K_REG_D0));
+	dataRegisters.push_back(Register(M68K_REG_D1));
+	dataRegisters.push_back(Register(M68K_REG_D2));
+	dataRegisters.push_back(Register(M68K_REG_D3));
+	dataRegisters.push_back(Register(M68K_REG_D4));
+	dataRegisters.push_back(Register(M68K_REG_D5));
+	dataRegisters.push_back(Register(M68K_REG_D6));
+	dataRegisters.push_back(Register(M68K_REG_D7));
+
+
+	addressRegisters.push_back(Register(M68K_REG_A0));
+	addressRegisters.push_back(Register(M68K_REG_A1));
+	addressRegisters.push_back(Register(M68K_REG_A2));
+	addressRegisters.push_back(Register(M68K_REG_A3));
+	addressRegisters.push_back(Register(M68K_REG_A4));
+	addressRegisters.push_back(Register(M68K_REG_A5));
+	addressRegisters.push_back(Register(M68K_REG_A6));
+	addressRegisters.push_back(Register(M68K_REG_A7));
+}
+
+void Registers::UpdateFromSimulator() {
+	for(auto &r : dataRegisters) {
+		r.Update();
+	}
+	for(auto &r : addressRegisters) {
+		r.Update();
+	}
+}
+
+void Registers::Print() {
+	for(auto &r : dataRegisters) {
+		printf("%s:%c%s, ",r.Name().c_str(), r.IsChanged()?'*':' ',r.Value().c_str());
+	}
 	printf("\n");
-	for (int i=	M68K_REG_A0;i<=M68K_REG_A7;i++) {
-		uint32_t reg = m68k_get_reg(NULL, (m68k_register_t)i);		
-		printf("%s: $%.8x, ",a_regnames[i - M68K_REG_A0], reg);
-	}	
+	for(auto &r : addressRegisters) {
+		printf("%s:%c%s, ",r.Name().c_str(), r.IsChanged()?'*':' ',r.Value().c_str());
+	}
 	printf("\n");
 }
+
+
+#define MAX_PC_HISTORY 16
+
 
 class PCHistoryItem {
 public:
@@ -83,6 +167,7 @@ protected:
 	char buff[100];
 
 };
+
 PCHistory::PCHistory(int maxitems) {
 	this->maxitems = maxitems;
 	Initialize();
@@ -184,118 +269,6 @@ void PCHistory::Disasm() {
 }
 
 
-
-#define MAX_PC_HISTORY 16
-typedef struct PC_HISTORY PC_HISTORY;
-struct PC_HISTORY {
-	uint32_t pc[MAX_PC_HISTORY];
-	uint32_t last;
-	int next;
-};
-
-static PC_HISTORY pc_history;
-
-static void pc_history_fill(uint32_t frompc);
-static void pc_history_add(uint32_t pc);
-
-
-static void pc_history_init() {
-	for(int i=0;i<MAX_PC_HISTORY;i++) {
-		pc_history.pc[i] = 0;
-	}
-	pc_history.last = 0;
-	pc_history.next = 0;
-
-	pc_history_fill(m68k_get_reg(NULL, M68K_REG_PC));
-}
-
-static void pc_history_fill(uint32_t frompc) {
-	// now fill buffer
-	static char buff[100];
-
-	uint32_t pc =  m68k_get_reg(NULL, M68K_REG_PC);
-	uint32_t instr_size;
-	for (int i=0;i<MAX_PC_HISTORY;i++) {
-		pc_history.pc[i] = pc;
-		pc_history.next = i;
-		pc_history.last = pc;
-
-		instr_size = m68k_disassemble(buff, pc, M68K_CPU_TYPE_68000);
-		pc += instr_size;
-
-	}
-
-}
-
-static uint32_t pc_next_relative(uint32_t pc) {
-	static char buff[100];
-	uint32_t instr_size;
-	instr_size = m68k_disassemble(buff, pc, M68K_CPU_TYPE_68000);
-	pc += instr_size;
-	return pc;	
-}
-static void pc_history_add(uint32_t pc) {
-
-	if (pc_history.next == (MAX_PC_HISTORY-1)) {
-
-		if ((pc >= pc_history.pc[0]) && (pc <= pc_history.pc[MAX_PC_HISTORY/2])) {
-			// we are within first portion of window range, do nothing
-//			printf("Within first portion of window range..\n");
-			return;
-		}
-
-//		printf("At end, mid pc: %.4x\n",pc_history.pc[MAX_PC_HISTORY/2]);
-
-		if (pc >= pc_history.pc[MAX_PC_HISTORY/2]) {
-			if (pc > pc_history.pc[1 + MAX_PC_HISTORY/2]) {
-				// long jump, refill from PC
-				// pc_history_init();
-				pc_history_fill(pc);
-				return;
-			} else {
-				//printf("scroll + add\n");	
-				for(int i=1;i<MAX_PC_HISTORY;i++) {
-					pc_history.pc[i-1] = pc_history.pc[i];
-				}
-				pc_history.pc[MAX_PC_HISTORY-1] = pc_next_relative(pc_history.pc[MAX_PC_HISTORY-2]);
-				return;
-			}
-		}
-	}
-
-	pc_history.pc[pc_history.next] = pc;
-	pc_history.last = pc;
-	pc_history.next++;
-	if (pc_history.next > (MAX_PC_HISTORY -1)) {
-		pc_history.next = MAX_PC_HISTORY - 1;
-
-		// for(int i=1;i<MAX_PC_HISTORY;i++) {
-		// 	pc_history.pc[i-1] = pc_history.pc[i];
-		// }
-	}
-}
-
-static void disasm_with_history() {
-	static char buff[100];
-	static char buff2[100];
-	static unsigned int instr_size;
-
-	uint32_t current_pc = m68k_get_reg(NULL, M68K_REG_PC);
-
-	for (int i=0;i<(pc_history.next+1);i++) {
-		uint32_t pc = pc_history.pc[i];
-		instr_size = m68k_disassemble(buff, pc, M68K_CPU_TYPE_68000);
-		make_hex(buff2, pc, instr_size);
-		if (pc == current_pc) {
-			printf("-> E %03x: %-20s: %s\n", pc, buff2, buff);
-
-		} else {
-			printf("   E %03x: %-20s: %s\n", pc, buff2, buff);
-		}
-		fflush(stdout);
-	}
-}
-
 void cpu_instr_callback()
 {
 /* The following code would print out instructions as they are executed */
@@ -364,6 +337,7 @@ int main(int argc, char* argv[])
 	sim_begin();
 
 	PCHistory history(MAX_PC_HISTORY);
+	Registers regs;
 
 //	pc_history_init();
 
@@ -372,24 +346,10 @@ int main(int argc, char* argv[])
 	bool bQuit = false;
 	while(!bQuit)
 	{
-		// Our loop requires some interleaving to allow us to update the
-		// input, output, and nmi devices.
-		//get_user_input();
-
-		// Values to execute determine the interleave rate.
-		// Smaller values allow for more accurate interleaving with multiple
-		// devices/CPUs but is more processor intensive.
-		// 100000 is usually a good value to start at, then work from there.
-
-		// Note that I am not emulating the correct clock speed!
-		//m68k_execute(100000);
-		dump_registers();
-		//pc_history_add(m68k_get_reg(NULL, M68K_REG_PC));
+		regs.Print();
 		history.Add(m68k_get_reg(NULL, M68K_REG_PC));
 		history.Disasm();
-		
-		//disasm_with_history();
-		//disasm_next();
+
 		//
 		// TODO:
 		//  run_to <address>, run to specific address before breaking execution
@@ -408,6 +368,7 @@ int main(int argc, char* argv[])
 			case 'q' :
 				bQuit = true;
 				break;
+			// NOT NEEDED!!!
 			case 's' : // step
 				bExecute = TRUE;
 				break;
@@ -415,7 +376,7 @@ int main(int argc, char* argv[])
 				disasm(10);
 				break;
 			case 'r' : 
-				dump_registers();
+				regs.Print();
 				break;
 			case 'h' :
 				printf("Help:\n");
@@ -430,6 +391,7 @@ int main(int argc, char* argv[])
 
 		if (bExecute) {
 			sim_step();
+			regs.UpdateFromSimulator();
 		}
 
 		// output_device_update();
