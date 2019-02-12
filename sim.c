@@ -509,16 +509,128 @@ static void dump_registers() {
 	printf("\n");
 }
 
+#define MAX_PC_HISTORY 16
+typedef struct PC_HISTORY PC_HISTORY;
+struct PC_HISTORY {
+	uint32_t pc[MAX_PC_HISTORY];
+	uint32_t last;
+	int next;
+};
+
+static PC_HISTORY pc_history;
+
+static void pc_history_fill(uint32_t frompc);
+static void pc_history_add(uint32_t pc);
+
+
+static void pc_history_init() {
+	for(int i=0;i<MAX_PC_HISTORY;i++) {
+		pc_history.pc[i] = 0;
+	}
+	pc_history.last = 0;
+	pc_history.next = 0;
+
+	pc_history_fill(m68k_get_reg(NULL, M68K_REG_PC));
+}
+
+static void pc_history_fill(uint32_t frompc) {
+	// now fill buffer
+	static char buff[100];
+
+	uint32_t pc =  m68k_get_reg(NULL, M68K_REG_PC);
+	uint32_t instr_size;
+	for (int i=0;i<MAX_PC_HISTORY;i++) {
+		pc_history.pc[i] = pc;
+		pc_history.next = i;
+		pc_history.last = pc;
+
+		instr_size = m68k_disassemble(buff, pc, M68K_CPU_TYPE_68000);
+		pc += instr_size;
+
+	}
+
+}
+
+static uint32_t pc_next_relative(uint32_t pc) {
+	static char buff[100];
+	uint32_t instr_size;
+	instr_size = m68k_disassemble(buff, pc, M68K_CPU_TYPE_68000);
+	pc += instr_size;
+	return pc;	
+}
+static void pc_history_add(uint32_t pc) {
+
+	if (pc_history.next == (MAX_PC_HISTORY-1)) {
+
+		if ((pc >= pc_history.pc[0]) && (pc <= pc_history.pc[MAX_PC_HISTORY/2])) {
+			// we are within first portion of window range, do nothing
+//			printf("Within first portion of window range..\n");
+			return;
+		}
+
+//		printf("At end, mid pc: %.4x\n",pc_history.pc[MAX_PC_HISTORY/2]);
+
+		if (pc >= pc_history.pc[MAX_PC_HISTORY/2]) {
+			if (pc > pc_history.pc[1 + MAX_PC_HISTORY/2]) {
+				// long jump, refill from PC
+				// pc_history_init();
+				pc_history_fill(pc);
+				return;
+			} else {
+				//printf("scroll + add\n");	
+				for(int i=1;i<MAX_PC_HISTORY;i++) {
+					pc_history.pc[i-1] = pc_history.pc[i];
+				}
+				pc_history.pc[MAX_PC_HISTORY-1] = pc_next_relative(pc_history.pc[MAX_PC_HISTORY-2]);
+				return;
+			}
+		}
+	}
+
+	pc_history.pc[pc_history.next] = pc;
+	pc_history.last = pc;
+	pc_history.next++;
+	if (pc_history.next > (MAX_PC_HISTORY -1)) {
+		pc_history.next = MAX_PC_HISTORY - 1;
+
+		// for(int i=1;i<MAX_PC_HISTORY;i++) {
+		// 	pc_history.pc[i-1] = pc_history.pc[i];
+		// }
+	}
+}
+
+static void disasm_with_history() {
+	static char buff[100];
+	static char buff2[100];
+	static unsigned int instr_size;
+
+	uint32_t current_pc = m68k_get_reg(NULL, M68K_REG_PC);
+
+	for (int i=0;i<(pc_history.next+1);i++) {
+		uint32_t pc = pc_history.pc[i];
+		instr_size = m68k_disassemble(buff, pc, M68K_CPU_TYPE_68000);
+		make_hex(buff2, pc, instr_size);
+		if (pc == current_pc) {
+			printf("-> E %03x: %-20s: %s\n", pc, buff2, buff);
+
+		} else {
+			printf("   E %03x: %-20s: %s\n", pc, buff2, buff);
+		}
+		fflush(stdout);
+	}
+}
+
 void cpu_instr_callback()
 {
 /* The following code would print out instructions as they are executed */
 	static char buff[100];
-	static char buff2[100];
+//	static char buff2[100];
 	static unsigned int pc;
 	static unsigned int instr_size;
 
 	pc = m68k_get_reg(NULL, M68K_REG_PC);
 	instr_size = m68k_disassemble(buff, pc, M68K_CPU_TYPE_68000);
+
 	// make_hex(buff2, pc, instr_size);
 	// printf("E %03x: %-20s: %s\n", pc, buff2, buff);
 	// fflush(stdout);
@@ -589,6 +701,8 @@ int main(int argc, char* argv[])
 	output_device_reset();
 	nmi_device_reset();
 
+	pc_history_init();
+
 	char buffer[256];
 	int bExecute = TRUE;
 	g_quit = 0;
@@ -606,7 +720,9 @@ int main(int argc, char* argv[])
 		// Note that I am not emulating the correct clock speed!
 		//m68k_execute(100000);
 		dump_registers();
-		disasm_next();
+		pc_history_add(m68k_get_reg(NULL, M68K_REG_PC));
+		disasm_with_history();
+		//disasm_next();
 		//
 		// TODO:
 		//  run_to <address>, run to specific address before breaking execution

@@ -37,7 +37,7 @@ $(TARGET): $(MUSASHIGENHFILES) $(.OFILES) makefile $(HELLO)
 	$(CC) -o $@ $(.OFILES) $(LFLAGS)
 
 $(HELLO): hello.s
-	vasmm68k_mot -phxass -m68000 -Fbin hello.s -o hello.bin
+	vasmm68k_mot -phxass -m68060 -Fbin hello.s -o hello.bin
 	
 $(MUSASHIGENCFILES) $(MUSASHIGENHFILES): $(MUSASHIGENERATOR)$(EXE)
 	$(EXEPATH)$(MUSASHIGENERATOR)$(EXE)
