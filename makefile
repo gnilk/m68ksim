@@ -3,7 +3,7 @@ EXENAME          = sim
 OSD_DOS          = osd_dos.c
 
 OSDFILES         = $(OSD_DOS)
-MAINFILES        = sim.c
+MAINFILES        = sim.cpp simulator.c
 MUSASHIFILES     = m68kcpu.c m68kdasm.c
 MUSASHIGENCFILES = m68kops.c m68kopac.c m68kopdm.c m68kopnz.c
 MUSASHIGENHFILES = m68kops.h
@@ -18,7 +18,7 @@ EXEPATH = ./
 .CFILES   = $(MAINFILES) $(OSDFILES) $(MUSASHIFILES) $(MUSASHIGENCFILES)
 .OFILES   = $(.CFILES:%.c=%.o)
 
-CC        = gcc
+CC        = cc
 WARNINGS  = -Wall -pedantic
 CFLAGS    = $(WARNINGS) -I../
 LFLAGS    = $(WARNINGS)
