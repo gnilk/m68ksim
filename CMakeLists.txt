@@ -64,13 +64,14 @@ add_custom_command(
 		DEPENDS generator)
 
 add_custom_command(
-		OUTPUT hello.bin
+		OUTPUT hello.exe
 		WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}		
-		COMMAND vasmm68k_mot -phxass -m68060 -Fbin -o ${CMAKE_CURRENT_BINARY_DIR}/hello.bin ${srcasm}
+		COMMAND vasmm68k_mot -phxass -m68060 -Fhunk -linedebug -o ${CMAKE_CURRENT_BINARY_DIR}/hello.o ${srcasm}
+		COMMAND vlink -o ${CMAKE_CURRENT_BINARY_DIR}/hello.exe ${CMAKE_CURRENT_BINARY_DIR}/hello.o
 		DEPENDS ${srcasm}
 		VERBATIM)
 
-add_custom_target(dummy DEPENDS hello.bin)
+add_custom_target(dummy DEPENDS hello.exe)
 
 #
 # Debugger UI

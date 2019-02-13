@@ -156,6 +156,7 @@ unsigned int cpu_read_long_dasm(unsigned int address)
 /* Write data to RAM or a device */
 void cpu_write_byte(unsigned int address, unsigned int value)
 {
+	printf("cpu_write_byte: $%.8x, $%.2x\n", address, (uint8_t)(value & 0xff));
 	if(g_fc & 2)	/* Program */
 		exit_error("Attempted to write %02x to ROM address %08x", value&0xff, address);
 
@@ -421,10 +422,15 @@ int sim_loadfile(const char *filename) {
 	return 1;
 }
 
+
+uint32_t sim_loadaddr() {
+	return ROM_FILE_ADDRESS;
+}
+
 static AHPInfo *currentFile = NULL;
 
 
-static AHPSection* sim_getcodesection() {
+AHPSection* sim_getcodesection() {
 	for (int i = 0; i < currentFile->sectionCount; ++i) {
 		AHPSection* section = &currentFile->sections[i];
 		if (section->type == AHPSectionType_Code) {
@@ -438,6 +444,11 @@ uint32_t sim_getsectionstart() {
 	AHPSection *code = sim_getcodesection();
 	return code->dataStart + ROM_FILE_ADDRESS;
 }
+
+uint32_t sim_AHPSectionOffsetToAddr(AHPSection *section, uint32_t offset) {
+	return (offset + section->dataStart + ROM_FILE_ADDRESS);
+}
+
 
 const char *sim_symbolforaddr(uint32_t addr) {
 	if (currentFile == NULL) return NULL;
@@ -454,10 +465,26 @@ const char *sim_symbolforaddr(uint32_t addr) {
 	return NULL;
 }
 
-int sim_loadhunkfile(const char *filename) {
+uint32_t sim_addrforsymbol(const char *sym) {
+	if (currentFile == NULL) return 0;
+	AHPSection *code = sim_getcodesection();
+
+	uint32_t sectstart = code->dataStart + ROM_FILE_ADDRESS;
+	for (int i=0;i<code->symbolCount;i++) {
+		if (!strcmp(code->symbols[i].name, sym)) {
+			uint32_t symaddr = (code->symbols[i].address >> 2);
+			symaddr += code->dataStart + ROM_FILE_ADDRESS;
+			return symaddr;
+		}
+	}
+	return 0;
+}
+
+
+AHPInfo *sim_loadhunkfile(const char *filename) {
     AHPInfo* ahp = ahp_parse_file(filename);
     if (ahp == NULL) {
-        return 0;
+        return NULL;
     }
 
     currentFile = ahp;
@@ -467,16 +494,17 @@ int sim_loadhunkfile(const char *filename) {
     printf("File Size: %d\n", ahp->fileSize);
     // Push this to memory
 
-    //sim_loadfile(filename);
     memcpy(&g_rom[8], ahp->fileData, ahp->fileSize);
     ahp_print_info(ahp,1);
+
+
 
 
     // TODO: Fix this!
 	WRITE_LONG(g_rom, 0, MAX_RAM);	// Stack at this RAM address
 	WRITE_LONG(g_rom, 4, 8);
 
-    return 1;
+    return ahp;
 }
 
 

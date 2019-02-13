@@ -107,7 +107,6 @@ static void *textureBuffer = NULL;
 static int textureScaling = 2;
 static uint32_t memoryTextureAddr = 0;
 
-
 static PCHistory *history;
 static Registers *regs;
 static time_t tLastActive;
@@ -115,6 +114,8 @@ static char cmdbuffer[256];
 static ConsoleBuffer consoleBuffer;
 static CommandHistory commandHistory;
 static uint32_t memoryViewAddr = 0;
+static SourceLineDebug *sourceLineDebug;
+static uint32_t runToPCEquals = 0;
 
 
 int AppInit(int argc, char **argv) {
@@ -128,13 +129,23 @@ int AppInit(int argc, char **argv) {
     // if (!sim_loadfile(argv[1])) {
     //     return 0;
     // }
-    if (!sim_loadhunkfile(argv[1])) {
-        return 0;
+    AHPInfo *ahp = sim_loadhunkfile(argv[1]);
+    if (ahp == NULL) {
+        return NULL;
     }
+
+    // Try to resolve source line debugging
+    sourceLineDebug = SourceLineDebug::FromAHP(ahp);
+
+    // AHPSection *codeSection = ahp_getcodesection(ahp);
+    // if (codeSection != NULL) {
+    //     ahp_convertsymbols(codeSection);         
+    // }
+
 
     sim_begin();
 
-    history = new PCHistory(MAX_PC_HISTORY);
+    history = new PCHistory(MAX_PC_HISTORY, sourceLineDebug);
     regs = new Registers();
     // PCHistory history(MAX_PC_HISTORY);
     // Registers regs;
@@ -162,7 +173,7 @@ static void ShowMemoryDump() {
     ImGui::Begin("MemoryView", nullptr, ImVec2(640,360));
     ImGui::Text("Memory from: $%.8x", memoryViewAddr);
 
-    uint8_t *ptrRom = (uint8_t *)sim_romptr(0);
+    uint8_t *ptrRom = (uint8_t *)sim_ramptr(0);
 
     uint32_t ofs = memoryViewAddr;
     // Scaling options???
@@ -181,7 +192,7 @@ static void ShowMemoryDump() {
 static void ShowMemoryTexture() {
 //    IMGUI_API void          Image(ImTextureID user_texture_id, const ImVec2& size, const ImVec2& uv0 = ImVec2(0,0), const ImVec2& uv1 = ImVec2(1,1), const ImVec4& tint_col = ImVec4(1,1,1,1), const ImVec4& border_col = ImVec4(0,0,0,0));
 
-    textureBuffer = sim_romptr(memoryTextureAddr);
+    textureBuffer = sim_ramptr(memoryTextureAddr);
 
     glBindTexture(GL_TEXTURE_2D, memoryTextureID);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, 320, 180, 0, GL_RED, GL_UNSIGNED_BYTE, textureBuffer);
@@ -267,6 +278,10 @@ static char *num2bin(unsigned int num, char *buffer, int maxlen) {
     return buffer;
 }
 
+static uint32_t ResolveSymbol(std::string name) {
+    return sim_addrforsymbol(name.c_str());
+}
+
 static void ParseCommands(std::vector<std::string> &args) {
 
     for(int i=0;i<args.size();i++) {
@@ -284,6 +299,20 @@ static void ParseCommands(std::vector<std::string> &args) {
             memoryTextureAddr = (uint32_t)tmp;
         }
     } 
+
+    if (args[0] == std::string("m")) {
+        if (args.size() != 2) {
+            consoleBuffer.Printf("Error: Wrong number of arguments!\n");
+            consoleBuffer.Printf("Use: m <addr>\n");
+            return;            
+        }
+        double tmp;
+        if (gnilk::ExpSolver::Solve(&tmp, args[1].c_str())) {
+            memoryViewAddr = (uint32_t)tmp;
+        }
+    } 
+
+
     if ((args[0] == std::string("o")) || (args[0] == std::string("open"))) {
         if (args.size() != 2) {
             consoleBuffer.Printf("Error: Wrong number of arguments!");
@@ -294,6 +323,15 @@ static void ParseCommands(std::vector<std::string> &args) {
         return;
     }
 
+    if ((args[0] == std::string("sym")) || (args[0] == std::string("symbols"))) {
+        if (args.size() != 1) {
+            consoleBuffer.Printf("Error: Wrong number of arguments!");
+            consoleBuffer.Printf("Use: sym");
+            return;            
+        }
+        // TODO: list symbols
+    }
+
     if ((args[0] == std::string("j")) || (args[0] == std::string("jump"))) {
         if (args.size() != 2) {
             consoleBuffer.Printf("Error: Wrong number of arguments!");
@@ -301,12 +339,18 @@ static void ParseCommands(std::vector<std::string> &args) {
             return;
         }
         double tmp;
-        if (!gnilk::ExpSolver::Solve(&tmp, args[1].c_str())) {
-            //memoryTextureAddr = (uint32_t)tmp;
-            consoleBuffer.Printf("Error: can't resolve '%s'", args[1].c_str());
-            return;
+        uint32_t addr;
+        addr = ResolveSymbol(args[1]);
+
+        if (addr == 0) {
+            if (!gnilk::ExpSolver::Solve(&tmp, args[1].c_str())) {
+                consoleBuffer.Printf("Error: can't resolve '%s'", args[1].c_str());
+                return;
+            } else {
+                addr = (unsigned int)tmp;
+            }
         }
-        m68k_set_reg(M68K_REG_PC, (unsigned int)tmp);
+        m68k_set_reg(M68K_REG_PC, addr);
         history->FillFrom(m68k_get_reg(NULL, M68K_REG_PC));
         return;
     }
@@ -330,7 +374,30 @@ static void ParseCommands(std::vector<std::string> &args) {
             //memoryTextureAddr = (uint32_t)tmp;
             m68k_set_reg(reg, (unsigned int)tmp);
         }
+        return;
     } 
+
+    if (args[0] == std::string("rt")) {
+        if (args.size() != 2) {
+            consoleBuffer.Printf("Error: Wrong number of arguments!\n");
+            consoleBuffer.Printf("Use: rt <value>\n");
+            return;
+        }
+
+        double tmp;
+        uint32_t addr;
+        addr = ResolveSymbol(args[1]);
+        if (addr == 0) {
+            if (!gnilk::ExpSolver::Solve(&tmp, args[1].c_str())) {
+                consoleBuffer.Printf("Error: can't resolve '%s'", args[1].c_str());
+                return;
+            }
+            addr = (unsigned int)tmp;
+        }
+        runToPCEquals = addr;
+        return;
+    } 
+
 
     // Just run this through the expression solver
     double tmp;        
@@ -342,7 +409,7 @@ static void ParseCommands(std::vector<std::string> &args) {
     }
 }
 
-static void ProcessCommand(const char *cmdstr) {
+static bool ProcessCommand(const char *cmdstr) {
 
     if (strlen(cmdstr)>0) {
         std::vector<std::string> args;
@@ -351,10 +418,25 @@ static void ProcessCommand(const char *cmdstr) {
         commandHistory.Push(cmdstr);    // This goes on the history buffer
         consoleBuffer.Printf("%s", cmdstr);  
         ParseCommands(args);
-        // don't step
-        return;
+        // Just update the registers since we might have modified them
+        regs->UpdateFromSimulator();
+        return true;
     }
 
+    return false;
+}
+
+static bool IsComment(std::string &str) {
+    if (str.length() < 16) return false;
+    std::string cpy(str.begin()+16, str.end());
+    strutil::trim(cpy);
+    if ((cpy.length() > 0) && (cpy[0]==';')) {
+        return true;
+    }
+    return false;
+}
+
+static void StepExecution() {
     // Perfor step in simulator
     sim_step();
     // Update registry and history/disasm buffer
@@ -364,20 +446,30 @@ static void ProcessCommand(const char *cmdstr) {
     tLastActive = 0;
 }
 
-
 static void ShowMainWindow() {
     std::vector<std::string> disasm;
-
 
     history->Disasm(disasm);
     ImGui::Begin("Disasm", nullptr, ImVec2(1200,800));
 
-    //ImGui::SetKeyboardFocusHere();
     if (ImGui::InputText("Cmd", cmdbuffer, IM_ARRAYSIZE(cmdbuffer), ImGuiInputTextFlags_EnterReturnsTrue)) {
         printf("Process command: %s\n", cmdbuffer);
-        ProcessCommand(cmdbuffer);
+        if (!ProcessCommand(cmdbuffer)) {
+            StepExecution();
+        }
         cmdbuffer[0]='\0';
     }
+
+    if (runToPCEquals > 0) {
+        uint32_t pcCurrent = m68k_get_reg(NULL, M68K_REG_PC);
+        if (pcCurrent == runToPCEquals) {
+            runToPCEquals = 0;
+        } else {
+            printf("RT, current: %.8x, dst: %.8x\n", pcCurrent, runToPCEquals);
+            StepExecution();
+        }
+
+    } 
     ImGui::SetItemDefaultFocus();
     if (!ImGui::IsItemActive()) {
         time_t tNow;
@@ -388,8 +480,14 @@ static void ShowMainWindow() {
 
         }
     }
-    for(int i=0;i<10;i++) {
-        ImGui::Text("%s",disasm[i].c_str());
+
+
+    for(int i=0;i<disasm.size();i++) {
+        if (IsComment(disasm[i])) {
+            ImGui::TextColored(ImColor(128,128,128), "%s", disasm[i].c_str());
+        } else {
+            ImGui::TextColored(ImColor(255,255,255), "%s",disasm[i].c_str());
+        }
     }
     ImGui::Separator();
     for (int i=0;i<consoleBuffer.history.size();i++) {

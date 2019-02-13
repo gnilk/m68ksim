@@ -6,6 +6,8 @@
 extern "C" {
 #endif
 
+#include <amiga_hunk_parser.h>
+
 /* Memory-mapped IO ports */
 #define INPUT_ADDRESS  0x800000
 #define OUTPUT_ADDRESS 0x400000
@@ -84,8 +86,13 @@ uint32_t sim_stack_top();
 
 
 // Hunk file support
-int sim_loadhunkfile(const char *filename);
+//int sim_loadhunkfile(const char *filename);
+AHPInfo *sim_loadhunkfile(const char *filename);
 const char *sim_symbolforaddr(uint32_t addr);
+uint32_t sim_addrforsymbol(const char *sym);
+
+uint32_t sim_loadaddr();
+uint32_t sim_AHPSectionOffsetToAddr(AHPSection *section, uint32_t offset);
 
 int sim_loadfile(const char *filename);
 int sim_begin();

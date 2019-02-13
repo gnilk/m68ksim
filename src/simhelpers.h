@@ -11,10 +11,31 @@
 #include "m68k.h"
 #include "osd.h"
 #include "strutil.h"
+#include <amiga_hunk_parser.h>
 
 static const std::string glbRegnames[]={"d0","d1","d2","d3","d4","d5","d6","d7","a0","a1","a2","a3","a4","a5","a6","a7"};
 
 bool RegisterFromString(std::string reg, m68k_register_t &outreg);
+
+
+class SourceLineItem {
+public:
+	std::string srcString;
+	uint32_t srcLine;
+	uint32_t addr;
+	uint32_t pc_addr;	// this is the properly converted address
+};
+
+class SourceLineDebug {
+public:
+	SourceLineDebug();
+	static SourceLineDebug *FromAHP(AHPInfo *ahp);
+	void ParseAHPLineInfo(AHPSection *section, AHPLineInfo *lineInfo);
+	SourceLineItem *GetItem(uint32_t addr);
+	SourceLineItem *GetItemFromSrcLine(uint32_t srcLine);
+private:
+	std::vector<SourceLineItem *> lineItems;
+};
 
 
 class Register {
@@ -57,7 +78,7 @@ public:
 };
 class PCHistory {
 public:
-	PCHistory(int maxitems);
+	PCHistory(int maxitems, SourceLineDebug *sld = NULL);
 	void Initialize();
 	void FillFrom(uint32_t pc);
 	uint32_t NextRelative(uint32_t pc);
@@ -69,6 +90,7 @@ public:
 	uint32_t last;
 	int next;
 	int maxitems;
+	SourceLineDebug *sourceLineDebug;
 protected:
 	char buff[100];
 

@@ -10,6 +10,8 @@
 #include "strutil.h"
 #include "simhelpers.h"
 
+#include <amiga_hunk_parser.h>
+
 // see m68k.h - line: 93 for the enum declaration
 //static const std::string glbRegnames[]={"d0","d1","d2","d3","d4","d5","d6","d7","a0","a1","a2","a3","a4","a5","a6","a7"};
 /* Disassembler */
@@ -37,6 +39,7 @@ bool RegisterFromString(std::string reg, m68k_register_t &outreg) {
 	}
 	return false;
 }
+
 
 
 
@@ -114,12 +117,128 @@ void Registers::Print() {
 }
 
 
+static AHPSection* ahp_getcodesection(AHPInfo *ahp) {
+	for (int i = 0; i < ahp->sectionCount; ++i) {
+		AHPSection* section = &ahp->sections[i];
+		if (section->type == AHPSectionType_Code) {
+			return section; 
+		}
+	}
+	return NULL;
+}
+
+
+SourceLineDebug::SourceLineDebug() {
+
+}
+// Static
+SourceLineDebug *SourceLineDebug::FromAHP(AHPInfo *ahp) {
+	AHPSection *code = ahp_getcodesection(ahp);
+	if (code == NULL) {
+		printf("SourceLineDebug::FromAHP, code section not found\n");
+		return NULL;
+	} 
+	if (code->debugLines == NULL) {
+		printf("SourceLineDebug::FromAHP, no debug line info in code section\n");
+		return NULL;
+	}
+	SourceLineDebug * sld = new SourceLineDebug();
+
+	for(int i=0;i<code->debugLineCount;i++) {
+		AHPLineInfo *dbgLine = &code->debugLines[i];
+		sld->ParseAHPLineInfo(code, dbgLine);
+	}
+	return sld;
+}
+
+static FILE *tryOpen(char *path, const char *filename) {
+	char buffer[256];
+	snprintf(buffer, 256, "%s/%s", path, filename);
+	return fopen(buffer, "r");
+}
+
+/*
+typedef struct AHPLineInfo
+{
+	const char* filename;
+	int count;
+
+	uint32_t baseOffset;
+
+	uint32_t* addresses;
+	int* lines;
+
+} AHPLineInfo;
+
+*/
+void SourceLineDebug::ParseAHPLineInfo(AHPSection *section, AHPLineInfo *lineInfo) {
+	// Try load...
+	FILE *f = tryOpen(".",lineInfo->filename);
+	if (f == NULL) {
+		f = tryOpen("..",lineInfo->filename);
+		if (f == NULL) {
+			// TODO: add specific search paths to some kind of config
+			printf("FAILED TO OPEN: %s\n", lineInfo->filename);
+		}
+	}
+	printf("Source file: %s opened\n", lineInfo->filename);
+
+	int dbgLineCount = 0;
+	int lineCount = 0;
+	char buffer[1024];
+	while(fgets(buffer,1024,f) != NULL) {
+		uint32_t addr = 0;
+		uint32_t pc_addr = 0;
+		std::string str(buffer);
+
+		if ((lineCount+1) == lineInfo->lines[dbgLineCount]) {
+			addr = lineInfo->addresses[dbgLineCount];
+			pc_addr = sim_AHPSectionOffsetToAddr(section, addr);
+			dbgLineCount++;
+		}
+		SourceLineItem *item = new SourceLineItem();
+
+		item->srcString = std::string(buffer);
+		strutil::rtrim(item->srcString);
+		item->srcLine = lineCount;
+		item->addr = addr;
+		item->pc_addr = pc_addr;
+
+		printf("%d, $%.8x: %s\n", item->srcLine, item->pc_addr, item->srcString.c_str());
+
+		lineItems.push_back(item);
+
+		lineCount++;
+	}
+	fclose(f);
+
+}
+
+SourceLineItem *SourceLineDebug::GetItem(uint32_t pc_addr) {
+	for(int i=0;i<lineItems.size();i++) {
+		if (lineItems[i]->pc_addr == pc_addr) {
+			return lineItems[i];
+		}
+	}
+	return NULL;
+}
+SourceLineItem *SourceLineDebug::GetItemFromSrcLine(uint32_t srcLine) {
+	for (int i=0;i<lineItems.size();i++) {
+		if (lineItems[i]->srcLine == srcLine) {
+			return lineItems[i];
+		}
+	}
+	return NULL;
+}
+
+
 #define MAX_PC_HISTORY 16
 
 
 
-PCHistory::PCHistory(int maxitems) {
+PCHistory::PCHistory(int maxitems, 	SourceLineDebug *sld /* = NULL */) {
 	this->maxitems = maxitems;
+	this->sourceLineDebug = sld;
 	Initialize();
 }
 
@@ -196,6 +315,10 @@ void PCHistory::Add(uint32_t pc) {
 	}
 }
 
+//
+// TODO: This should NOT return list of strings but rather a list of structured line-items which can be formatted
+//       properly by the UI
+//
 void PCHistory::Disasm(std::vector<std::string> &outstrings) {
 	static char buff[100];
 	static char buff2[100];
@@ -203,27 +326,69 @@ void PCHistory::Disasm(std::vector<std::string> &outstrings) {
 
 	uint32_t current_pc = m68k_get_reg(NULL, M68K_REG_PC);
 
+	uint32_t prevSrcLine = 0;
+
+	SourceLineItem *lineDebugItem = NULL;
 	char line[256];
 
 	for (int i=0;i<(next+1);i++) {
 		uint32_t pc = items[i].pc;
+		//printf("Disasm, pc: %x\n", pc);	
+
 		const char *symbol = sim_symbolforaddr(pc);
-		// if (symbol != NULL) {
-		// 	printf("SYMBOL: %.8x : %s\n", pc, symbol);
-		// }
+
+		if (symbol != NULL) {
+			outstrings.push_back(std::string(symbol));
+		}
+
+		lineDebugItem = NULL;
+		if (sourceLineDebug != NULL) {
+			lineDebugItem = sourceLineDebug->GetItem(pc);
+		}
+
+
 		instr_size = m68k_disassemble(buff, pc, M68K_CPU_TYPE_68000);
 		make_hex(buff2, pc, instr_size);
 		if (pc == current_pc) {
 			snprintf(line, 256, "-> E %03x: %-20s: %s\n", pc, buff2, buff);
-//			printf("-> E %03x: %-20s: %s\n", pc, buff2, buff);
 		} else {
 			snprintf(line, 256, "   E %03x: %-20s: %s\n", pc, buff2, buff);
-//			printf("   E %03x: %-20s: %s\n", pc, buff2, buff);
 		}
-		if (symbol != NULL) {
-			outstrings.push_back(std::string(symbol));
+
+		std::string outline;
+		if (lineDebugItem != NULL) {
+			char srcLine[256];
+
+			// Did we miss source lines???
+			if ((prevSrcLine > 0) && ((lineDebugItem->srcLine - prevSrcLine) > 1)) {
+				// Need to fill in extra lines here
+//				printf("currentLine: %d, prev: %d, missing: %d\n", lineDebugItem->srcLine, prevSrcLine, lineDebugItem->srcLine - prevSrcLine);
+				for(uint32_t i=prevSrcLine+1; i<lineDebugItem->srcLine;i++) {
+					SourceLineItem *item = sourceLineDebug->GetItemFromSrcLine(i);
+					//printf("Fetching: %d:%d, %s\n", i, item->srcLine, item->srcString.c_str());
+					//                      01234567890123456
+					snprintf(srcLine, 256, "         :%.4d|  %s%s",
+						item->srcLine,
+						"  ",
+						item->srcString.c_str());
+
+					outstrings.push_back(std::string(srcLine));
+				}
+			}
+
+			snprintf(srcLine, 256, "$%.8x:%.4d|  %s%s",
+				pc, 
+				lineDebugItem->srcLine,
+				(pc == current_pc)?"->":"  ",
+				lineDebugItem->srcString.c_str());
+
+			outline = std::string(srcLine);		
+			// Store this, to identify gaps	
+			prevSrcLine = lineDebugItem->srcLine;
+		} else {
+			outline = std::string(line);
 		}
-		outstrings.push_back(std::string(line));
+		outstrings.push_back(outline);
 		fflush(stdout);
 	}
 
