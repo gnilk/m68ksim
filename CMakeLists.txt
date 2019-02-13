@@ -38,7 +38,7 @@ list(APPEND imguisrc dep/imgui/imgui.cpp)
 list(APPEND imguisrc dep/imgui/imgui_widgets.cpp)
 list(APPEND imguisrc dep/imgui/imgui_draw.cpp)
 list(APPEND imguisrc dep/imgui/imgui_demo.cpp)
-
+list(APPEND imguisrc dep/ImGuiColorTextEdit/TextEditor.cpp)
 
 
 add_library(imgui STATIC ${imguisrc})
@@ -48,6 +48,8 @@ target_include_directories(imgui PUBLIC dep/imgui)
 add_executable(generator ${srcgen})
 add_executable(sim ${srcsim_con} ${srcsim_lib} ${srcsim_gen})
 
+
+set_property(TARGET imgui PROPERTY CXX_STANDARD 11)
 
 set_property(TARGET sim PROPERTY CXX_STANDARD 11)
 
@@ -109,3 +111,6 @@ target_include_directories(dbgui PRIVATE /usr/local/include)
 target_include_directories(dbgui PRIVATE dep/imgui/examples)
 target_include_directories(dbgui PRIVATE dep/imgui/examples/libs/gl3w)
 target_include_directories(dbgui PRIVATE dep/AmigaHunkParser)
+target_include_directories(dbgui PRIVATE dep/ImGuiColorTextEdit)
+
+set_property(TARGET dbgui PROPERTY CXX_STANDARD 11)

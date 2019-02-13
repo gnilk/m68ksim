@@ -19,6 +19,10 @@
 #include <string>
 #include <vector>
 
+#include <fstream>
+#include <streambuf>
+
+#include <TextEditor.h>
 #include <amiga_hunk_parser.h>
 #include "expsolver.h"
 
@@ -137,6 +141,8 @@ int AppInit(int argc, char **argv) {
     sim_begin();
 
     LoadHunkFile(argv[1]);
+
+    sim_begin();
 
     // AHPInfo *ahp = sim_loadhunkfile(argv[1]);
     // if (ahp == NULL) {
@@ -484,13 +490,15 @@ static void ShowMainWindow() {
 
     } 
     ImGui::SetItemDefaultFocus();
-    if (!ImGui::IsItemActive()) {
-        time_t tNow;
-        ::time(&tNow);
-        if ((tNow - tLastActive) > 2) {
-            ImGui::SetKeyboardFocusHere(-1);
-            tLastActive = tNow;
+    if (ImGui::IsWindowFocused()) {
+        if (!ImGui::IsItemActive()) {
+            time_t tNow;
+            ::time(&tNow);
+            if ((tNow - tLastActive) > 2) {
+                ImGui::SetKeyboardFocusHere(-1);
+                tLastActive = tNow;
 
+            }
         }
     }
 
@@ -510,9 +518,25 @@ static void ShowMainWindow() {
     ImGui::End();   
 }
 
+static TextEditor editor;
+static const char* fileToEdit = "../src/hello.s";
+static void ShowEditor() {
+    ImGui::Begin("EditorWindow");
+    editor.Render("TextEditor");    
+    ImGui::End();
+}
 
 void AppRun()
 {
+    // {
+    //         std::ifstream t(fileToEdit);
+    //         if (t.good())
+    //         {
+    //             std::string str((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+    //             editor.SetText(str);
+    //         }
+    // }    
+    // ShowEditor();
     ShowRegisters();
     ShowMemoryTexture();
     ShowStack();
