@@ -26,3 +26,5 @@ Commands in the debugger:
 - rt address/symbol, run-to address or symbol
 
 
+Screenshot
+![Screenshot](/screenshot/Amiga_Debugger_v3.png)
