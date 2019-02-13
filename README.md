@@ -19,10 +19,10 @@ The Debugger will search for source code like this:
 	../src/file
 
 Commands in the debugger:
-- mt <address>, memory texture from address
-- m <address>, view memory from address
-- sr <reg> <value>, set registry (d0..d7, a0..a7) to value
-- j <address/symbol>, jump to address or symbol
-- rt <address/symbol>, run-to address or symbol
+- mt address, memory texture from address
+- m address, view memory from address
+- sr reg value, set registry (d0..d7, a0..a7) to value
+- j address/symbol, jump to address or symbol
+- rt address/symbol, run-to address or symbol
 
 
