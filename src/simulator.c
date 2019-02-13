@@ -5,6 +5,7 @@
 
 #include "m68k.h"
 #include "simulator.h"
+#include <amiga_hunk_parser.h>
 
 /* Data */
 unsigned int g_quit = 0;                        /* 1 if we want to quit */
@@ -21,6 +22,20 @@ unsigned int g_int_controller_highest_int = 0;  /* Highest pending interrupt */
 unsigned char g_rom[MAX_ROM+1];                 /* ROM */
 unsigned char g_ram[MAX_RAM+1];                 /* RAM */
 unsigned int  g_fc;                             /* Current function code from CPU */
+
+
+void *sim_romptr(uint32_t addr) {
+	if (addr > MAX_ROM) {
+		return 0;
+	}
+	return &g_rom[addr];
+}
+void *sim_ramptr(uint32_t addr) {
+	if (addr > MAX_RAM) {
+		return 0;
+	}
+	return &g_ram[addr];	
+}
 
 
 
@@ -99,7 +114,7 @@ unsigned int cpu_read_word(unsigned int address)
 
 unsigned int cpu_read_long(unsigned int address)
 {
-	printf("cpu_read_long: $%.8x\n", address);
+//	printf("cpu_read_long: $%.8x\n", address);
 	if(g_fc & 2)	/* Program */
 	{
 		if(address > MAX_ROM)
@@ -185,6 +200,8 @@ void cpu_write_word(unsigned int address, unsigned int value)
 
 void cpu_write_long(unsigned int address, unsigned int value)
 {
+	printf("cpu_write_long: $%.8x, $%.8x\n", address, value);
+
 	if(g_fc & 2)	/* Program */
 		exit_error("Attempted to write %08x to ROM address %08x", value, address);
 
@@ -381,6 +398,7 @@ void cpu_instr_callback()
 	// fflush(stdout);
 }
 
+#define ROM_FILE_ADDRESS 0x08
 
 // sim_loadfile, loads a binary (code) file to memory and set up the stack and jump address correctly
 int sim_loadfile(const char *filename) {
@@ -389,6 +407,7 @@ int sim_loadfile(const char *filename) {
 	if((fhandle = fopen(filename, "rb")) == NULL)
 		return 0;
 
+	// Load binary to rom
 	if(fread(&g_rom[8], 1, MAX_ROM+1, fhandle) <= 0)
 		return 0;
 
@@ -401,6 +420,77 @@ int sim_loadfile(const char *filename) {
 
 	return 1;
 }
+
+static AHPInfo *currentFile = NULL;
+
+
+static AHPSection* sim_getcodesection() {
+	for (int i = 0; i < currentFile->sectionCount; ++i) {
+		AHPSection* section = &currentFile->sections[i];
+		if (section->type == AHPSectionType_Code) {
+			return section; 
+		}
+	}
+	return NULL;
+}
+
+uint32_t sim_getsectionstart() {
+	AHPSection *code = sim_getcodesection();
+	return code->dataStart + ROM_FILE_ADDRESS;
+}
+
+const char *sim_symbolforaddr(uint32_t addr) {
+	if (currentFile == NULL) return NULL;
+
+	AHPSection *code = sim_getcodesection();
+
+	uint32_t sectstart = code->dataStart + ROM_FILE_ADDRESS;
+	for (int i=0;i<code->symbolCount;i++) {
+		uint32_t symaddr = (code->symbols[i].address >> 2);
+		if (addr == (symaddr + code->dataStart + ROM_FILE_ADDRESS)) {
+			return code->symbols[i].name;
+		}
+	}
+	return NULL;
+}
+
+int sim_loadhunkfile(const char *filename) {
+    AHPInfo* ahp = ahp_parse_file(filename);
+    if (ahp == NULL) {
+        return 0;
+    }
+
+    currentFile = ahp;
+
+    // Reinitialize simulator
+    //sim_begin();
+    printf("File Size: %d\n", ahp->fileSize);
+    // Push this to memory
+
+    //sim_loadfile(filename);
+    memcpy(&g_rom[8], ahp->fileData, ahp->fileSize);
+    ahp_print_info(ahp,1);
+
+
+    // TODO: Fix this!
+	WRITE_LONG(g_rom, 0, MAX_RAM);	// Stack at this RAM address
+	WRITE_LONG(g_rom, 4, 8);
+
+    return 1;
+}
+
+
+
+uint32_t sim_stack_addr() {
+	return m68k_get_reg(NULL, M68K_REG_A7);
+}
+
+
+// Top location of the stack is located in ROM at address 0 - see "sim_loadfile"
+uint32_t sim_stack_top() {
+	return READ_LONG(g_rom, 0);
+}
+
 
 //
 // sim_begin, initializes the simulator

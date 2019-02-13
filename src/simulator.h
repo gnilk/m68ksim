@@ -77,6 +77,16 @@ void get_user_input(void);
 void exit_error(char* fmt, ...);
 
 
+void *sim_romptr(uint32_t addr);
+void *sim_ramptr(uint32_t addr);
+uint32_t sim_stack_addr();
+uint32_t sim_stack_top();
+
+
+// Hunk file support
+int sim_loadhunkfile(const char *filename);
+const char *sim_symbolforaddr(uint32_t addr);
+
 int sim_loadfile(const char *filename);
 int sim_begin();
 int sim_step();

@@ -19,20 +19,34 @@ set(CMAKE_BUILD_TYPE Debug)
 
 include_directories("${PROJECT_SOURCE_DIR}")
 
+
 # sim core 
-list(APPEND srcsim src/sim.cpp src/strutil.cpp src/simulator.c src/m68kcpu.c src/m68kdasm.c)
+list(APPEND srcsim_lib src/simhelpers.cpp src/strutil.cpp src/simulator.c src/m68kcpu.c src/m68kdasm.c)
+list(APPEND srcsim_lib dep/AmigaHunkParser/amiga_hunk_parser.c)
+
 # generated src
 list(APPEND srcsim_gen src/m68kops.c src/m68kopac.c src/m68kopdm.c src/m68kopnz.c)
-
+#console app
+list(APPEND srcsim_con src/sim.cpp)
 # generator
 list(APPEND srcgen src/m68kmake.c)
 
+# assembler source
 list(APPEND srcasm src/hello.s)
 
+list(APPEND imguisrc dep/imgui/imgui.cpp)
+list(APPEND imguisrc dep/imgui/imgui_widgets.cpp)
+list(APPEND imguisrc dep/imgui/imgui_draw.cpp)
+list(APPEND imguisrc dep/imgui/imgui_demo.cpp)
+
+
+
+add_library(imgui STATIC ${imguisrc})
+target_include_directories(imgui PUBLIC dep/imgui)
 
 
 add_executable(generator ${srcgen})
-add_executable(sim ${srcsim} ${srcsim_gen})
+add_executable(sim ${srcsim_con} ${srcsim_lib} ${srcsim_gen})
 
 
 set_property(TARGET sim PROPERTY CXX_STANDARD 11)
@@ -40,6 +54,7 @@ set_property(TARGET sim PROPERTY CXX_STANDARD 11)
 
 target_include_directories(generator PUBLIC ./include)
 target_include_directories(sim PRIVATE /usr/local/include)
+target_include_directories(sim PRIVATE dep/AmigaHunkParser)
 
 
 add_custom_command(
@@ -57,6 +72,18 @@ add_custom_command(
 
 add_custom_target(dummy DEPENDS hello.bin)
 
+#
+# Debugger UI
+#
+list(APPEND uisrc src/ui/main.cpp)
+list(APPEND uisrc src/ui/app.cpp)
+list(APPEND uisrc src/ui/expsolver.cpp)
+list(APPEND uisrc src/ui/tokenizer.cpp)
+list(APPEND uisrc dep/imgui/examples/imgui_impl_glfw.cpp)
+list(APPEND uisrc dep/imgui/examples/imgui_impl_opengl3.cpp)
+list(APPEND uisrc dep/imgui/examples/libs/gl3w/GL/gl3w.c)
+#list(APPEND uisrc dep/AmigaHunkParser/amiga_hunk_parser.c)
+
 
 set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/local/lib)
 find_library(COCOA_FRAMEWORK Cocoa)
@@ -64,19 +91,7 @@ find_library(IOKIT_FRAMEWORK IOKit)
 find_library(CORE_FRAMEWORK CoreFoundation)
 find_library(CORE_VIDEO_FRAMEWORK CoreVideo)
 find_library(OPENGL_FRAMEWORK OpenGL)
-
-if (GOA_BUILD_GLFW)
-	#
-	# If we want to specify options to GLFW's configuration, e.g. build as shared library:
-	# set(BUILD_SHARED_LIBS ON CACHE BOOL "Build GLFW as shared library")
-	# Then maybe this should be moved into a CMakeLists.txt in "deps/" instead so any options
-	# wont affect the rest of GOA.
-	#
-	add_subdirectory(deps/glfw)
-	set(GLFW glfw)
-else()
-	find_library(GLFW NAMES libglfw3.a PATHS)
-endif()
+find_library(GLFW NAMES libglfw3.a PATHS)
 
 message(STATUS "Cocoa Framework path: ${COCOA_FRAMEWORK}")
 message(STATUS "OpenGL Framework path: ${OPENGL_FRAMEWORK}")
@@ -85,3 +100,11 @@ message(STATUS "OSX Architectures: ${CMAKE_OSX_ARCHITECTURES}")
 
 target_link_libraries(generator ${COCOA_FRAMEWORK} ${IOKIT_FRAMEWORK} ${CORE_VIDEO_FRAMEWORK} ${OPENGL_FRAMEWORK} ${CORE_FRAMEWORK} ${GLFW})
 target_link_libraries(sim ${COCOA_FRAMEWORK} ${IOKIT_FRAMEWORK} ${CORE_VIDEO_FRAMEWORK} ${OPENGL_FRAMEWORK} ${CORE_FRAMEWORK} ${GLFW})
+
+
+add_executable(dbgui ${uisrc} ${srcsim_lib} ${srcsim_gen})
+target_link_libraries(dbgui imgui ${COCOA_FRAMEWORK} ${IOKIT_FRAMEWORK} ${CORE_VIDEO_FRAMEWORK} ${OPENGL_FRAMEWORK} ${CORE_FRAMEWORK} ${GLFW})
+target_include_directories(dbgui PRIVATE /usr/local/include)
+target_include_directories(dbgui PRIVATE dep/imgui/examples)
+target_include_directories(dbgui PRIVATE dep/imgui/examples/libs/gl3w)
+target_include_directories(dbgui PRIVATE dep/AmigaHunkParser)
