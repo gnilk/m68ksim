@@ -36,6 +36,9 @@ static Pixel* pixmap = NULL;
 static int pixmap_width = 0;
 static int pixmap_height = 0;
 
+static void LoadHunkFile(std::string filename);
+
+
 
 class CommandHistory {
 public:
@@ -126,27 +129,24 @@ int AppInit(int argc, char **argv) {
         printf("Usage: sim <program file>\n");
         return 0;
     }
-    // if (!sim_loadfile(argv[1])) {
-    //     return 0;
-    // }
-    AHPInfo *ahp = sim_loadhunkfile(argv[1]);
-    if (ahp == NULL) {
-        return NULL;
-    }
 
-    // Try to resolve source line debugging
-    sourceLineDebug = SourceLineDebug::FromAHP(ahp);
 
-    // AHPSection *codeSection = ahp_getcodesection(ahp);
-    // if (codeSection != NULL) {
-    //     ahp_convertsymbols(codeSection);         
-    // }
+
 
 
     sim_begin();
 
-    history = new PCHistory(MAX_PC_HISTORY, sourceLineDebug);
-    regs = new Registers();
+    LoadHunkFile(argv[1]);
+
+    // AHPInfo *ahp = sim_loadhunkfile(argv[1]);
+    // if (ahp == NULL) {
+    //     return NULL;
+    // }
+
+    // // Try to resolve source line debugging
+    // sourceLineDebug = SourceLineDebug::FromAHP(ahp);
+    // history = new PCHistory(MAX_PC_HISTORY, sourceLineDebug);
+    // regs = new Registers();
     // PCHistory history(MAX_PC_HISTORY);
     // Registers regs;
 
@@ -251,10 +251,23 @@ static void ShowRegisters() {
 
 
 static void LoadHunkFile(std::string filename) {
-    if (!sim_loadhunkfile(filename.c_str())) {
-        consoleBuffer.Printf("Failed to load: %s", filename.c_str());
-        return;        
+
+    AHPInfo *ahp = sim_loadhunkfile(filename.c_str());
+    if (ahp == NULL) {
+        consoleBuffer.Printf("Failed to load: %s", filename.c_str());        
+        return ;
     }
+
+    // Try to resolve source line debugging
+    sourceLineDebug = SourceLineDebug::FromAHP(ahp);
+    history = new PCHistory(MAX_PC_HISTORY, sourceLineDebug);
+    regs = new Registers();
+
+
+    // if (!sim_loadhunkfile(filename.c_str())) {
+    //     consoleBuffer.Printf("Failed to load: %s", filename.c_str());
+    //     return;        
+    // }
 
     consoleBuffer.Printf("Ok, new file loaded: %s", filename.c_str());
 
