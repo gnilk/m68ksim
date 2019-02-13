@@ -172,8 +172,20 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 		default:
 			break;
 	}
-	if(address > MAX_RAM)
+	if(address > MAX_RAM) {
+		uint32_t value;
+		printf("Address Registers\n");
+		for(int i=0;i<8;i++) {
+			value = m68k_get_reg(NULL, M68K_REG_A0 + i);		
+			printf("  a%d: $%.8x\n", i, value);
+		}
+		printf("Data Registers\n");
+		for(int i=0;i<8;i++) {
+			value = m68k_get_reg(NULL, M68K_REG_D0 + i);				
+			printf("  d%d: $%.8x\n", i, value);
+		}
 		exit_error("Attempted to write %02x to RAM address %08x", value&0xff, address);
+	}
 	WRITE_BYTE(g_ram, address, value);
 }
 

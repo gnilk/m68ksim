@@ -481,8 +481,11 @@ static void ShowMainWindow() {
 
     if (runToPCEquals > 0) {
         uint32_t pcCurrent = m68k_get_reg(NULL, M68K_REG_PC);
+        // Finished???
         if (pcCurrent == runToPCEquals) {
             runToPCEquals = 0;
+            // Refill history buffer from new position
+            history->FillFrom(m68k_get_reg(NULL, M68K_REG_PC));
         } else {
             printf("RT, current: %.8x, dst: %.8x\n", pcCurrent, runToPCEquals);
             StepExecution();

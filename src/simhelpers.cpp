@@ -276,31 +276,37 @@ uint32_t PCHistory::NextRelative(uint32_t pc) {
 
 void PCHistory::Add(uint32_t pc) {
 
-	if (next == (maxitems-1)) {
+	//
+	// TODO: Revisit this one!
+	//
 
-		if ((pc >= items[0].pc) && (pc <= items[maxitems/2].pc)) {
-			// we are within first portion of window range, do nothing
-//			printf("Within first portion of window range..\n");
+
+	if ((pc >= items[0].pc) && (pc <= items[maxitems/2].pc)) {
+		// we are within first portion of window range, do nothing
+		//printf("Within first portion of window range..\n");
+		return;
+	}
+
+	//printf("At end, pc: %.4x, first: %.4x: mid pc: %.4x\n",pc, items[0].pc, items[MAX_PC_HISTORY/2].pc);
+
+	if (pc >= items[maxitems/2].pc) {
+		if (pc > items[1 + maxitems/2].pc) {
+			// long jump, refill from PC
+			// pc_history_init();
+			FillFrom(pc);
+			return;
+		} else {
+			//printf("scroll + add\n");	
+			for(int i=1;i<maxitems;i++) {
+				items[i-1].pc = items[i].pc;
+			}
+			items[maxitems-1].pc = NextRelative(items[maxitems-2].pc);
 			return;
 		}
-
-//		printf("At end, mid pc: %.4x\n",pc_history.pc[MAX_PC_HISTORY/2]);
-
-		if (pc >= items[maxitems/2].pc) {
-			if (pc > items[1 + maxitems/2].pc) {
-				// long jump, refill from PC
-				// pc_history_init();
-				FillFrom(pc);
-				return;
-			} else {
-				//printf("scroll + add\n");	
-				for(int i=1;i<maxitems;i++) {
-					items[i-1].pc = items[i].pc;
-				}
-				items[maxitems-1].pc = NextRelative(items[maxitems-2].pc);
-				return;
-			}
-		}
+	} else if (pc < items[0].pc) {
+		//printf("Long jump before, we are not within window");
+		FillFrom(pc);
+		return;
 	}
 
 	items[next].pc = pc;
