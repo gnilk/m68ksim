@@ -269,7 +269,6 @@ static void LoadHunkFile(std::string filename) {
     history = new PCHistory(MAX_PC_HISTORY, sourceLineDebug);
     regs = new Registers();
 
-
     // if (!sim_loadhunkfile(filename.c_str())) {
     //     consoleBuffer.Printf("Failed to load: %s", filename.c_str());
     //     return;        

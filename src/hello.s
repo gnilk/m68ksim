@@ -1,31 +1,16 @@
     section code
 
 test:
-    move.l  $1000,a0
-    move.l  #160, d0
-    move.l  #80, d1
-
-    move.l  #160, d2
-    move.l  #10, d3
+    move.l  #$1000,a0
+    lea     p1, a1
+    lea     p2, a2
     jsr interpolate
 
-
-    move.l  $1000,a0
-    move.l  #160, d0
-    move.l  #80, d1
-
-    move.l  #300, d2
-    move.l  #80, d3
-    jsr interpolate
-
-    move.l  $1000,a0
-    move.l  #160, d0
-    move.l  #80, d1
-
-    move.l  #260, d2
-    move.l  #40, d3
-    jsr interpolate
-
+;
+; Declare two points
+;
+p1: dc.l  160,80
+p2: dc.l  160,10
 
     move.l  #4, d3
 .loop:
@@ -41,16 +26,22 @@ func1:
     rts
 ; ------------------------------------
 ;
-; a0: first byte of chunky image, assumed width is 320 byte (pixel)
+;   a0: first byte of chunky image, assumed width is 320 byte (pixel)
 ; TODO:
-;   d0/d1: p1 coordinate 1 values -> 32bit
-;   d2/d3: p2 coordinate 2 values -> 32bit
+;   a0: p1 coordinate 1 values -> 32bit
+;   a1: p2 coordinate 2 values -> 32bit
 ;
 ;
 interpolate:
+    move.l  (a1)+,d0
+    move.l  (a2)+,d2
+    move.l  (a1)+,d1
+    move.l  (a2)+,d3
+
     move.l  d2, d4
     move.l  d3, d5
     sub.l   d0, d4  ;; dx, d4 = d2 - d0
+
 
     bpl     .x_positive ;; can do bpl.b +2, as neg.l d4 is two bytes
     neg.l  d4

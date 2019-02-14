@@ -653,7 +653,7 @@ void ahp_print_info(AHPInfo* info, int verbose)
     		printf("  BaseOffset %d\n", debugLines->baseOffset);
 
     		for (i = 0; i < debugLines->count; ++i)
-    			printf("    %08x - %d\n", debugLines->addresses[i], debugLines->lines[i]);
+    			printf("    %08x - %d\n", debugLines->addresses[i] + section->dataStart + 8, debugLines->lines[i]);
 		}
 	}
 }

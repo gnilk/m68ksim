@@ -171,6 +171,16 @@ typedef struct AHPLineInfo
 } AHPLineInfo;
 
 */
+
+int SourceLineDebug::GetAHPLineInfoFromSrcLine(AHPLineInfo *lineInfo, int srcLine) {
+	for (int i=0;i<lineInfo->count;i++) {
+		if (lineInfo->lines[i] == srcLine) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 void SourceLineDebug::ParseAHPLineInfo(AHPSection *section, AHPLineInfo *lineInfo) {
 	// Try load...
 	FILE *f = tryOpen(".",lineInfo->filename);
@@ -181,7 +191,7 @@ void SourceLineDebug::ParseAHPLineInfo(AHPSection *section, AHPLineInfo *lineInf
 			printf("FAILED TO OPEN: %s\n", lineInfo->filename);
 		}
 	}
-	printf("Source file: %s opened\n", lineInfo->filename);
+	printf("Source file: %s opened, mapped line: %d\n", lineInfo->filename, lineInfo->count);
 
 	int dbgLineCount = 0;
 	int lineCount = 0;
@@ -191,11 +201,17 @@ void SourceLineDebug::ParseAHPLineInfo(AHPSection *section, AHPLineInfo *lineInf
 		uint32_t pc_addr = 0;
 		std::string str(buffer);
 
-		if ((lineCount+1) == lineInfo->lines[dbgLineCount]) {
-			addr = lineInfo->addresses[dbgLineCount];
-			pc_addr = sim_AHPSectionOffsetToAddr(section, addr);
-			dbgLineCount++;
-		}
+		int idxLineInfo = GetAHPLineInfoFromSrcLine(lineInfo, lineCount+1);
+		if (idxLineInfo > -1) {
+			addr = lineInfo->addresses[idxLineInfo];
+			pc_addr = sim_AHPSectionOffsetToAddr(section, addr);		
+		} 
+		
+		// if ((lineCount+1) == lineInfo->lines[dbgLineCount]) {
+		// 	addr = lineInfo->addresses[dbgLineCount];
+		// 	pc_addr = sim_AHPSectionOffsetToAddr(section, addr);
+		// 	dbgLineCount++;
+		// }
 		SourceLineItem *item = new SourceLineItem();
 
 		item->srcString = std::string(buffer);
@@ -350,6 +366,11 @@ void PCHistory::Disasm(std::vector<std::string> &outstrings) {
 		lineDebugItem = NULL;
 		if (sourceLineDebug != NULL) {
 			lineDebugItem = sourceLineDebug->GetItem(pc);
+			// if (lineDebugItem != NULL) {
+			// 	printf("%.4x : %s\n", pc, lineDebugItem->srcString.c_str());
+			// } else {
+			// 	printf("Missing sld for: %.4x\n", pc);
+			// }
 		}
 
 
@@ -368,7 +389,7 @@ void PCHistory::Disasm(std::vector<std::string> &outstrings) {
 			// Did we miss source lines???
 			if ((prevSrcLine > 0) && ((lineDebugItem->srcLine - prevSrcLine) > 1)) {
 				// Need to fill in extra lines here
-//				printf("currentLine: %d, prev: %d, missing: %d\n", lineDebugItem->srcLine, prevSrcLine, lineDebugItem->srcLine - prevSrcLine);
+				//printf("currentLine: %d, prev: %d, missing: %d\n", lineDebugItem->srcLine, prevSrcLine, lineDebugItem->srcLine - prevSrcLine);
 				for(uint32_t i=prevSrcLine+1; i<lineDebugItem->srcLine;i++) {
 					SourceLineItem *item = sourceLineDebug->GetItemFromSrcLine(i);
 					//printf("Fetching: %d:%d, %s\n", i, item->srcLine, item->srcString.c_str());
@@ -379,6 +400,7 @@ void PCHistory::Disasm(std::vector<std::string> &outstrings) {
 						item->srcString.c_str());
 
 					outstrings.push_back(std::string(srcLine));
+//					printf("  %s\n", srcLine);
 				}
 			}
 

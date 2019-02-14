@@ -33,6 +33,7 @@ public:
 	void ParseAHPLineInfo(AHPSection *section, AHPLineInfo *lineInfo);
 	SourceLineItem *GetItem(uint32_t addr);
 	SourceLineItem *GetItemFromSrcLine(uint32_t srcLine);
+	int GetAHPLineInfoFromSrcLine(AHPLineInfo *lineInfo, int srcLine);
 private:
 	std::vector<SourceLineItem *> lineItems;
 };

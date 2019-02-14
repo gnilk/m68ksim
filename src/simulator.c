@@ -477,6 +477,7 @@ const char *sim_symbolforaddr(uint32_t addr) {
 	return NULL;
 }
 
+
 uint32_t sim_addrforsymbol(const char *sym) {
 	if (currentFile == NULL) return 0;
 	AHPSection *code = sim_getcodesection();
@@ -507,6 +508,7 @@ AHPInfo *sim_loadhunkfile(const char *filename) {
     // Push this to memory
 
     memcpy(&g_rom[8], ahp->fileData, ahp->fileSize);
+    memcpy(&g_ram[8], ahp->fileData, ahp->fileSize);
     ahp_print_info(ahp,1);
 
 
@@ -514,7 +516,8 @@ AHPInfo *sim_loadhunkfile(const char *filename) {
 
     // TODO: Fix this!
 	WRITE_LONG(g_rom, 0, MAX_RAM);	// Stack at this RAM address
-	WRITE_LONG(g_rom, 4, 8);
+
+	WRITE_LONG(g_rom, 4, 40);
 
     return ahp;
 }
