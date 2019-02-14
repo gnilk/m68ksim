@@ -14,32 +14,26 @@ test:
 
 
     addq    #1, d7
-    cmp     #31,d7
+    cmp     #32,d7
     bne     .pointlp
     rts
 
-;
-; Declare two points
-;
-    move.l  #4, d3
-.loop:
-    move.l  #1, d0
-    move.l  #2, d1
-    add.l   d1, d0
-    dbf     d3, .loop
-    rts
-func1:
-    move.l  #4, d0
-    move.l  #4, d1
-    add.l   d1, d0
-    rts
 ; ------------------------------------
 ;
-;   a0: first byte of chunky image, assumed width is 320 byte (pixel)
-; TODO:
-;   a0: p1 coordinate 1 values -> 32bit
-;   a1: p2 coordinate 2 values -> 32bit
+; Interpolate - DDA Line Drawer (without anything fancy)
 ;
+;   a0: first byte of chunky image, assumed width is 320 byte (pixel)
+;   a1: p1 coordinate [x,y] values -> 32bit
+;   a2: p2 coordinate [x,y] values -> 32bit
+;
+; Considering keeping it fixpoint to this level!!
+; We need some info in order to do subpixeling and stuff
+;
+; TODO:
+;    - Make interface compatible with GOA
+;      void drawline(GOA_PIXMAP8 *pixmap, float *p1, float *p2, int size, void *context)
+;    - Need to figure out how to declare a struct
+;   
 ;
 interpolate:
     move.l  (a1)+,d0
