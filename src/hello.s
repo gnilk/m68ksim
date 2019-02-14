@@ -1,17 +1,26 @@
     section code
 
 test:
+    move.l  #0, d7
+.pointlp:
+    move    d7,d0
+    lsl.l   #3, d0
     move.l  #$1000,a0
     lea     p1, a1
+    add.l   d0, a1
     lea     p2, a2
-    jsr interpolate
+    add.l   d0, a2
+    jsr     interpolate
+
+
+    addq    #1, d7
+    cmp     #31,d7
+    bne     .pointlp
+    rts
 
 ;
 ; Declare two points
 ;
-p1: dc.l  160,80
-p2: dc.l  160,10
-
     move.l  #4, d3
 .loop:
     move.l  #1, d0
@@ -70,6 +79,9 @@ interpolate:
     sub.l   d1, d3      ; d3 = dy, loop register
     divs    d5, d4      ;; d4 = dx / dy
     ext.l   d4
+
+    mulu    #320, d1
+    add.l   d1, a0
     ;;
     ;; d0 = x1 (fix-point)
     ;; 
@@ -111,6 +123,8 @@ interpolate:
     sub.l   d0, d2      ; d2 = dx, loop register
     divs    d4, d5      ;; d5 = dy / dx
     ext.l   d5
+
+    add.l   d0, a0      ;; smarter to use lea???
     ;;
     ;; d0 - x1 coord
     ;; d1 - y1 coord
@@ -132,3 +146,73 @@ interpolate:
     addq    #1, a0
     dbf     d2, .loop_x
     rts
+
+;
+; Some data, 32 points
+;
+p1:
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+    dc.l    160, 90
+p2:
+    dc.l    200, 90
+    dc.l    199, 97
+    dc.l    196, 105
+    dc.l    193, 112
+    dc.l    188, 118
+    dc.l    182, 123
+    dc.l    175, 126
+    dc.l    167, 129
+    dc.l    160, 130
+    dc.l    152, 129
+    dc.l    144, 126
+    dc.l    137, 123
+    dc.l    131, 118
+    dc.l    126, 112
+    dc.l    123, 105
+    dc.l    120, 97
+    dc.l    120, 90
+    dc.l    120, 82
+    dc.l    123, 74
+    dc.l    126, 67
+    dc.l    131, 61
+    dc.l    137, 56
+    dc.l    144, 53
+    dc.l    152, 50
+    dc.l    160, 50
+    dc.l    167, 50
+    dc.l    175, 53
+    dc.l    182, 56
+    dc.l    188, 61
+    dc.l    193, 67
+    dc.l    196, 74
+    dc.l    199, 82
