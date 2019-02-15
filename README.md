@@ -24,6 +24,7 @@ Commands in the debugger:
 - sr reg value, set registry (d0..d7, a0..a7) to value
 - j address/symbol, jump to address or symbol
 - rt address/symbol, run-to address or symbol
+- enter to step
 
 
 Screenshot
