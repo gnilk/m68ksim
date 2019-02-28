@@ -416,6 +416,20 @@ static void ParseCommands(std::vector<std::string> &args) {
         return;
     } 
 
+    if (args[0] == std::string("?")) {
+        consoleBuffer.Printf("<ret>          step (execute one instruction)\n");
+        consoleBuffer.Printf("rt <sym/addr>  Run to symbol or address\n");
+        consoleBuffer.Printf("sr <reg> <val> Set Register\n");
+        consoleBuffer.Printf("j <sym/addr>   Jump to symbol or address (alias for 'jump')\n");
+        consoleBuffer.Printf("m <sym/addr>   Memory view at address or Symbol\n");
+        consoleBuffer.Printf("mt <sym/addr>  Memory Texture at address or Symbol\n");
+        consoleBuffer.Printf("<expr>         Solve the expression, like: 4+4\n");
+        consoleBuffer.Printf("---- Not well tested stuff\n");
+        consoleBuffer.Printf("o <file>       LoadHunkFile\n");
+        consoleBuffer.Printf("sym            List symbols (not implemented)\n");
+
+        return;
+    }
 
     // Just run this through the expression solver
     double tmp;        

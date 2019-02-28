@@ -1,6 +1,27 @@
     section code
 
 test:
+    move.l  #$1000,a0
+    move.l  #$deadbeef, d0
+    move.l  #320*180,d6
+    jsr     memset
+
+
+    rts
+.end_test:
+    move.l  #$1000, a3
+    move.l  #$1001, a4
+
+    move.b   #1, (a3)
+    move.b   #2, (a4)
+
+    move.b   (a3), (a4)
+
+    cmp.b   (a3), d7
+    beq     .apa
+    move.b  (a3),(a4)
+.apa:
+
     move.l  #0, d7
 .pointlp:
     move    d7,d0
@@ -16,6 +37,69 @@ test:
     addq    #1, d7
     cmp     #32,d7
     bne     .pointlp
+    rts
+; ------------------------------------
+;
+; Version 1
+;
+; clear screen 320x180, 060 optimized
+;
+; a0: pointer to memory
+; d0: value 
+; d7: bytes
+;
+; ------------------------------------
+memset:
+    ;; setup address regs's so they occupy one complete cache line each
+    lea.l   (16,a0),a1
+    move.l  d0,d1
+    lea.l   (32,a0),a2
+    move.l  d0,d2
+    lea.l   (48,a0),a3
+    move.l  d0,d3
+
+    lsr.l   #4, d6
+
+    ;;
+    ;;
+    ;; pre-fetch and clear all cache lines
+    ;;
+    ;; 16 byte in four lines
+    ;;
+.loop:
+    ;; clear 4 * 4 bytes
+    move.l  d0,(a0)+
+    move.l  d1,(a1)+
+    move.l  d2,(a2)+
+    move.l  d3,(a3)+
+    ;; clear 4 * 4 bytes
+    move.l  d0,(a0)+
+    move.l  d1,(a1)+
+    move.l  d2,(a2)+
+    move.l  d3,(a3)+
+    ;; clear 4 * 4 bytes
+    move.l  d0,(a0)+
+    move.l  d1,(a1)+
+    move.l  d2,(a2)+
+    move.l  d3,(a3)+
+    ;; clear 4 * 4 bytes
+    move.l  d0,(a0)+
+    move.l  d1,(a1)+
+    move.l  d2,(a2)+
+    move.l  d3,(a3)+
+
+    ;;
+    ;; Advance four cache lines for each...
+    ;;
+    add.l   #64-16,a0
+    add.l   #64-16,a1
+    add.l   #64-16,a2
+    add.l   #64-16,a3
+    ;;
+    ;; we have cleared 4*4*4 bytes -> 64 bytes
+    ;;
+    subq    #1, d6
+    bne     .loop
     rts
 
 ; ------------------------------------
