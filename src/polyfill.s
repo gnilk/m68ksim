@@ -5,6 +5,11 @@
 GOA_PIXMAP_PALETTESIZE equ 256
 
 ;
+; higher will cause problems with division
+;
+FIX_BITS equ 7
+
+;
 ; GOA_RGBA, see pixmap.h
 ;
 ;typedef struct
@@ -12,6 +17,11 @@ GOA_PIXMAP_PALETTESIZE equ 256
 ;    BYTE r,g,b,a;
 ;} GOA_RGBA;
 ;
+
+        rsreset
+vertex_x            rs.l 1
+vertex_y            rs.l 1
+vertex_z            rs.l 1
 
         rsreset
 goa_rgba_r          rs.b 1  
@@ -66,70 +76,6 @@ test:
 endtest:
     rts
 
-    move.l  goa_pixmap_width(a0),d0
-    move.l  goa_pixmap_height(a0),d1
-
-    move.l  #$123, d0
-    asr.l   #8, d0
-
-    move.l  #$1000,a0
-    move.l  #$1010,a1
-    move.l  #$1,d4
-    move.l  #$2,d0
-
-
-    move.b  #1,$1000
-    move.b  #2,$1001
-    move.b  #0,$1010
-    move.b  #0,$1011
-    move.b  (a0,d4), (a1,d0)
-
-    move.l    #$ff,d5
-    add.b   (a0,d4),d5
-
-filltest:
-    move.l  #$1000,a0
-    move.l  #$deadbeef, d0
-    move.l  #256,d6
-    jsr     memset
-
-    move.l  #$1100,a0
-    move.l  #$1000,a1
-    move.l  #$deadbeef, d0
-    move.l  #256,d6
-    jsr     memcpy32
-
-    rts
-.end_test:
-    move.l  #$1000, a3
-    move.l  #$1001, a4
-
-    move.b   #1, (a3)
-    move.b   #2, (a4)
-
-    move.b   (a3), (a4)
-
-    cmp.b   (a3), d7
-    beq     .apa
-    move.b  (a3),(a4)
-.apa:
-
-    move.l  #0, d7
-.pointlp:
-    move    d7,d0
-    lsl.l   #3, d0
-    move.l  #$1000,a0
-    lea     p1, a1
-    add.l   d0, a1
-    lea     p2, a2
-    add.l   d0, a2
-    jsr     interpolate
-
-
-    addq    #1, d7
-    cmp     #32,d7
-    bne     .pointlp
-    rts
 ;
 ; a0: pointer to pixmap data
 ;
@@ -154,24 +100,48 @@ testpixmap:
 ; a2: v2, fp: 24:8
 ; a3: v3, fp: 24:8
 ;
+; NOTE: the number of FIX_POINT_BITS is critical, 6 is too low
+;
+;
+; v1:     dc.l    160,  0, 0
+; v2:     dc.l    100, 80, 0
+; v3:     dc.l    110,140, 0
+;
+;
+;
 ; ------------------------------------
 drawflat:
     ;
     ; NOTE: this can be pre-calculated for poly streaming
     ;
-    move.l (4,a1), d1
-    cmp.l  (4,a2), d1
-    bgt     .no_swap_y1_y2
+
+    move.l vertex_y(a1), d1   
+    move.l vertex_y(a2), d2
+    move.l vertex_y(a3), d3   
+
+
+;    if (y1 > y2) {
+;        swap(v1, v2);
+;    }
+    move.l vertex_y(a1), d1   
+    cmp.l  vertex_y(a2), d1     ;; effectively: y1 - y2, which is negative if y2 > y1
+    bmi     .no_swap_y1_y2
     exg    a1,a2
-    move.l (4,a1), d1
+    move.l vertex_y(a1), d1
 .no_swap_y1_y2:
-    cmp.l  (4,a3), d1
-    bgt     .no_swap_y1_y3
+;    if (y1 > y3) {
+;        swap(v1, v3);
+;    }
+    cmp.l  vertex_y(a3), d1
+    bmi     .no_swap_y1_y3
     exg    a1,a3
 .no_swap_y1_y3:
-    move.l (4,a2), d1
-    cmp.l  (4,a3), d1
-    bgt     .no_swap_y2_y3
+;    if (y2 > y3) {
+;        swap(v2, x3);
+;    }
+    move.l vertex_y(a2), d1
+    cmp.l  vertex_y(a3), d1
+    bmi     .no_swap_y2_y3
     exg    a2, a3
 .no_swap_y2_y3:
     ;
@@ -193,14 +163,125 @@ drawflat:
     move.l (4,a3), d5   
     sub.l  (4,a1), d4   ;; y2-y1
     sub.l  (4,a2), d5   ;; y3-y2
-    move.l (4,a3), d6
-    divs   d4, d1       ;; d1 = (x2 - x1) / (y2 - y1)
-    sub.l  (4,a1),d6
-    divs   d5, d3       ;; d3 = (x3 - x2) / (y3 - y2)
-    divs   d6, d2       ;; d2 = (x3 - x1) / (y3 - y1)
-
+    ;; the above works for the test vertices
     
+slopecalc:
+    
+    ;;
+    ;; todo pipe line this!!!  had a pipelined version but needed more clarity when debugging!!
+    ;;
 
+    ;;
+    ;; Is this an issue on the 060, on < 030 this will cause division problem if shifted with 8 for numbers > 128
+    ;;
+
+    asl.l  #FIX_BITS,d1        ;;  8:8 fix point, doesn't work as the "sign" bit will be set for lines > 128px unless we can do long / long division
+    asl.l  #FIX_BITS,d2
+    asl.l  #FIX_BITS,d3
+                        ;;  ((f1 << FIX_BITS) / f2);
+    move.l (4,a3),d6
+    sub.l  (4,a1),d6   ;; d6 = y3 - y1
+
+    ;
+    ; not supported in emulator
+    ; divs.l   d4,d1       ;; d1 = dxdy1 = (x2 - x1) / (y2 - y1)
+    divs   d4,d1
+    ext.l  d1
+
+    divs   d6,d2       ;; d2 = dxdy2 = (x3 - x1) / (y3 - y1)
+    ext.l  d2
+
+    divs   d5,d3       ;; d3 = dxdy3 = (x3 - x2) / (y3 - y2)
+    ext.l  d3
+
+sidecalc:
+    ;
+    ; TODO: fix side computation here
+    ;
+
+    ; the code below works for long-edge on right-hand side!
+
+    ;; 
+    ;;
+    ;; TODO: Pipeline this properly
+    ;;
+    move.l  vertex_y(a1),d0              ;; d0 = y1
+    move.l  vertex_x(a1),d5              ;; d5 = xb, do this here as we skip the setup if zero height
+
+    ;; get scanline
+    asr.l   #FIX_BITS, d0           ;; fixpoint correction 
+    ;; can be optimized, but does not work in the emulator!!!
+    mulu    goa_pixmap_width(a0),d0     ;; width * y1, this is always unsigned!
+    move.l  goa_pixmap_image(a0),a4    
+    add.l   d0, a4                      ;; a4 = pixmap->image + width * y1; (&pixmap->image[width * y1])
+
+    ;; a4 points to the corfect scanline
+
+    move.l  vertex_x(a1),d4              ;; d4 = xa
+
+
+    ;; get the first scanline, part of this can be moved to where we dig out 'y1'
+    move.l  vertex_y(a1),d0      
+    move.l  vertex_y(a2),d6
+    sub.l   d0,d6                ;; d6 = dy = y2 - y1 (still in fix point)
+
+    asr.l   #FIX_BITS, d6           ;; fixpoint correction 
+    beq     .skip_upper_right
+
+.upper_right_y:
+    ;; TODO: scanline
+
+    ;; this just plots the edges of the upper triangle, replace with scanline
+    move.l  d4, d0
+    asr.l   #FIX_BITS,d0
+    move.b  #255,(a4, d0.l)
+    move.l  d5, d0
+    asr.l   #FIX_BITS,d0
+    move.b  #255,(a4, d0.l)
+    ;; end edge plotting
+
+
+    add.l   d1,d4                   ;; xafix += dxdy1
+    add.l   d2,d5                   ;; xbfix += dxdy2      
+    add.l   #320,a4                 ;; advance next scanline
+    subq.l  #1,d6
+    bne     .upper_right_y
+
+.skip_upper_right:
+
+    ;; very little setup for second segment as we just continue
+
+    move.l vertex_y(a3),d6
+    move.l  vertex_y(a2),d0
+    sub.l  d0,d6                ;; d6 = dy = y3 - y2
+    asr.l  #FIX_BITS, d6           ;; fixpoint correction 
+
+    ;; TODO: Zero check
+
+
+    ;move.l vertex_x(a2),d4              ;; d4 = xa
+    ;
+    ; d5 -> xb, stays the same
+    ;
+.lower_right_y:
+    ;; TODO: scanline
+
+    ;; this just plots the edges of the upper triangle, replace with scanline
+    move.l  d4, d0
+    asr.l   #FIX_BITS,d0
+    move.b  #255,(a4, d0.l)
+    move.l  d5, d0
+    asr.l   #FIX_BITS,d0
+    move.b  #255,(a4, d0.l)
+    ;; end edge plotting
+
+
+    add.l   d3,d4                   ;; xafix += dxdy3
+    add.l   d2,d5                   ;; xbfix += dxdy2      
+    add.l   #320,a4                 ;; advance next scanline
+    subq.l  #1,d6
+    bpl     .lower_right_y
+end_of_tri:
     rts
 
 
@@ -440,9 +521,14 @@ MakePixmap  Macro ;
 ; Note: vertices coming in are fixpoint 24:8
 ;
 
-v1:     dc.l    160<<8,  0<<8, 0
-v2:     dc.l    100<<8, 80<<8, 0
-v3:     dc.l    110<<8,140<<8, 0
+v1:     dc.l    160<<FIX_BITS,  0<<FIX_BITS, 0
+v2:     dc.l    100<<FIX_BITS, 80<<FIX_BITS, 0
+v3:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
+
+
+;v1:     dc.l    160,  0, 0
+;v2:     dc.l    100, 80, 0
+;v3:     dc.l    110,140, 0
 
 
 ;

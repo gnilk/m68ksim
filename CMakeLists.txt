@@ -32,7 +32,7 @@ list(APPEND srcsim_con src/sim.cpp)
 list(APPEND srcgen src/m68kmake.c)
 
 # assembler source
-list(APPEND srcasm src/hello.s)
+list(APPEND srcasm src/polyfill.s)
 
 list(APPEND imguisrc dep/imgui/imgui.cpp)
 list(APPEND imguisrc dep/imgui/imgui_widgets.cpp)
@@ -66,14 +66,14 @@ add_custom_command(
 		DEPENDS generator)
 
 add_custom_command(
-		OUTPUT hello.exe
+		OUTPUT polyfill.exe
 		WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}		
-		COMMAND vasmm68k_mot -phxass -m68060 -Fhunk -linedebug -o ${CMAKE_CURRENT_BINARY_DIR}/hello.o ${srcasm}
-		COMMAND vlink -o ${CMAKE_CURRENT_BINARY_DIR}/hello.exe ${CMAKE_CURRENT_BINARY_DIR}/hello.o
+		COMMAND vasmm68k_mot -phxass -m68060 -Fhunk -linedebug -o ${CMAKE_CURRENT_BINARY_DIR}/polyfill.o ${srcasm}
+		COMMAND vlink -o ${CMAKE_CURRENT_BINARY_DIR}/polyfill.exe ${CMAKE_CURRENT_BINARY_DIR}/polyfill.o
 		DEPENDS ${srcasm}
 		VERBATIM)
 
-add_custom_target(dummy DEPENDS hello.exe)
+add_custom_target(dummy DEPENDS polyfill.exe)
 
 #
 # Debugger UI
