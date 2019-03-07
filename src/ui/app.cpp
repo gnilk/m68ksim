@@ -313,9 +313,13 @@ static void ParseCommands(std::vector<std::string> &args) {
             return;            
         }
         double tmp;
-        if (gnilk::ExpSolver::Solve(&tmp, args[1].c_str())) {
-            memoryTextureAddr = (uint32_t)tmp;
+        memoryTextureAddr = ResolveSymbol(args[1]);
+        if (memoryTextureAddr == 0) {
+            if (gnilk::ExpSolver::Solve(&tmp, args[1].c_str())) {
+                memoryTextureAddr = (uint32_t)tmp;
+            }            
         }
+        return;
     } 
 
     if (args[0] == std::string("m")) {
@@ -324,10 +328,16 @@ static void ParseCommands(std::vector<std::string> &args) {
             consoleBuffer.Printf("Use: m <addr>\n");
             return;            
         }
-        double tmp;
-        if (gnilk::ExpSolver::Solve(&tmp, args[1].c_str())) {
-            memoryViewAddr = (uint32_t)tmp;
-        }
+        memoryViewAddr = ResolveSymbol(args[1]);
+    
+        if (memoryViewAddr == 0) {
+            double tmp;
+            if (gnilk::ExpSolver::Solve(&tmp, args[1].c_str())) {
+                memoryViewAddr = (uint32_t)tmp;
+            }
+
+        }        
+        return;
     } 
 
 
