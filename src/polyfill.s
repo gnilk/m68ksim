@@ -222,44 +222,28 @@ slopecalc:
     ext.l  d3
 
 sidecalc:
-    ;
-    ; TODO: fix side computation here
-    ;
-    ;
-    ;   int32_t side = dxdy2 > dxdy1;
-    ;
-    ; if (y1fix == y2fix)
-    ;    side = x1fix > x2fix;
-    ; if (y2fix == y3fix)
-    ;    side = x3fix > x2fix;
 
-    ;
-    ;
     moveq   #1, d0
-
     cmp.l  d1, d2
     bgt     .dxdy2_gt_dxdy1
     moveq   #0, d0
 .dxdy2_gt_dxdy1:  
-    ;;
-    ;; TODO: handle zero upper/lower segments
-    ;;
 
-    ;;
     ;; if (y1fix == y2fix)
-    ;;   side = x1fix > x2fix;
-    ;;
-
     move.l  vertex_y(a1),d4
     cmp.l   vertex_y(a2),d4
     bne     .y1fix_ne_y2fix
 
+    ;;   side = x1fix > x2fix;
     moveq   #1, d0
     move.l  vertex_x(a1),d4
     cmp.l   vertex_x(a2),d4
     bgt     .y1fix_ne_y2fix
     moveq   #0, d0
 .y1fix_ne_y2fix:  
+    ;;  TODO!!!
+;    if (y2fix == y3fix)
+;        side = x3fix > x2fix;
 
     cmp.l   #0,d0
     beq     .left_long_edge
@@ -311,10 +295,10 @@ sidecalc:
     asr.l   #FIX_BITS, d0
 
 .upper_right_y_scan:
-    move.b  #255,(a4,d3.l)
-    subq.l  #1,d3
-    cmp.l   d0,d3
-    bge     .upper_right_y_scan
+    move.b  #255,(a4,d0.l)
+    addq.l  #1,d0
+    cmp.l   d3,d0
+    ble     .upper_right_y_scan
     ;; end of scanline here
 
     add.l   d1,d4                   ;; xafix += dxdy1
@@ -347,10 +331,10 @@ sidecalc:
     asr.l   #FIX_BITS, d1
     asr.l   #FIX_BITS, d0
 .lower_right_y_scan:
-    move.b  #255, (a4,d1.l)
-    subq.l  #1,d1
-    cmp.l   d0,d1
-    bge     .lower_right_y_scan
+    move.b  #255, (a4,d0.l)
+    addq.l  #1,d0
+    cmp.l   d1,d0
+    ble     .lower_right_y_scan
 
 ;; end scanline, advance to next
 
