@@ -9,6 +9,16 @@ GOA_PIXMAP_PALETTESIZE equ 256
 ;
 FIX_BITS equ 7
 
+
+push    macro
+        movem.l \1,-(a7)
+        endm
+
+pop     macro
+        movem.l (a7)+,\1
+        endm
+
+
 ;
 ; GOA_RGBA, see pixmap.h
 ;
@@ -60,6 +70,16 @@ goa_pixmap_palette  rs.l GOA_PIXMAP_PALETTESIZE  ; array of GOA_RGBA
     section code
 
 test:
+
+    move.l  #4, d0
+    move.l  #2, d1
+    sub.l   d1, d0
+
+
+    move.l  #2, d0
+    move.l  #4, d1
+    sub.l   d1, d0
+
     ;
     ; I simply don't know how to autofill the pointer to the buffer in asm
     ; However, this is not an issue as it will be supplied from C/C++
@@ -69,10 +89,17 @@ test:
     move.l  a1, goa_pixmap_image(a0)
 
     lea     backbuffer,a0
-    lea     v1,a1
-    lea     v2,a2
-    lea     v3,a3
+    lea     v1_right,a1
+    lea     v2_right,a2
+    lea     v3_right,a3
     bsr     drawflat
+
+;    lea     backbuffer,a0
+;    lea     v1_left,a1
+;    lea     v2_left,a2
+;    lea     v3_left,a3
+;    bsr     drawflat
+
 endtest:
     rts
 
@@ -198,9 +225,49 @@ sidecalc:
     ;
     ; TODO: fix side computation here
     ;
+    ;
+    ;   int32_t side = dxdy2 > dxdy1;
+    ;
+    ; if (y1fix == y2fix)
+    ;    side = x1fix > x2fix;
+    ; if (y2fix == y3fix)
+    ;    side = x3fix > x2fix;
 
-    ; the code below works for long-edge on right-hand side!
+    ;
+    ;
+    moveq   #1, d0
 
+    cmp.l  d1, d2
+    bgt     .dxdy2_gt_dxdy1
+    moveq   #0, d0
+.dxdy2_gt_dxdy1:  
+    ;;
+    ;; TODO: handle zero upper/lower segments
+    ;;
+
+    ;;
+    ;; if (y1fix == y2fix)
+    ;;   side = x1fix > x2fix;
+    ;;
+
+    move.l  vertex_y(a1),d4
+    cmp.l   vertex_y(a2),d4
+    bne     .y1fix_ne_y2fix
+
+    moveq   #1, d0
+    move.l  vertex_x(a1),d4
+    cmp.l   vertex_x(a2),d4
+    bgt     .y1fix_ne_y2fix
+    moveq   #0, d0
+.y1fix_ne_y2fix:  
+
+    cmp.l   #0,d0
+    beq     .left_long_edge
+
+;;
+;; the code below works for long-edge on right-hand side!
+;;
+.right_long_edge:
     ;; 
     ;;
     ;; TODO: Pipeline this properly
@@ -209,13 +276,13 @@ sidecalc:
     move.l  vertex_x(a1),d5              ;; d5 = xb, do this here as we skip the setup if zero height
 
     ;; get scanline
-    asr.l   #FIX_BITS, d0           ;; fixpoint correction 
+    asr.l   #FIX_BITS, d0               ;; fixpoint correction 
     ;; can be optimized, but does not work in the emulator!!!
     mulu    goa_pixmap_width(a0),d0     ;; width * y1, this is always unsigned!
     move.l  goa_pixmap_image(a0),a4    
     add.l   d0, a4                      ;; a4 = pixmap->image + width * y1; (&pixmap->image[width * y1])
 
-    ;; a4 points to the corfect scanline
+    ;; a4 now points to the corfect scanline
 
     move.l  vertex_x(a1),d4              ;; d4 = xa
 
@@ -228,59 +295,167 @@ sidecalc:
     asr.l   #FIX_BITS, d6           ;; fixpoint correction 
     beq     .skip_upper_right
 
-.upper_right_y:
-    ;; TODO: scanline
+    ;;
+    ;; d5 is right hand coord (long side), this will live through
+    ;; d2 is right hand add (long side)
+    ;;
+    ;; d4 is left (upper portion)
 
-    ;; this just plots the edges of the upper triangle, replace with scanline
+    push    d3
+.upper_right_y_triseg:
+    ;; I've been testing a few ways in order to pipeline the loop better, but they all produced jagged edges
+    ;; This scanline version produces by far the best results...
+    move.l  d5, d3
     move.l  d4, d0
-    asr.l   #FIX_BITS,d0
-    move.b  #255,(a4, d0.l)
-    move.l  d5, d0
-    asr.l   #FIX_BITS,d0
-    move.b  #255,(a4, d0.l)
-    ;; end edge plotting
+    asr.l   #FIX_BITS, d3
+    asr.l   #FIX_BITS, d0
 
+.upper_right_y_scan:
+    move.b  #255,(a4,d3.l)
+    subq.l  #1,d3
+    cmp.l   d0,d3
+    bge     .upper_right_y_scan
+    ;; end of scanline here
 
     add.l   d1,d4                   ;; xafix += dxdy1
     add.l   d2,d5                   ;; xbfix += dxdy2      
     add.l   #320,a4                 ;; advance next scanline
     subq.l  #1,d6
-    bne     .upper_right_y
+    bne     .upper_right_y_triseg
+    pop     d3
 
+    ;; lower right from here
 .skip_upper_right:
-
     ;; very little setup for second segment as we just continue
-
     move.l vertex_y(a3),d6
     move.l  vertex_y(a2),d0
     sub.l  d0,d6                ;; d6 = dy = y3 - y2
     asr.l  #FIX_BITS, d6           ;; fixpoint correction 
-
-    ;; TODO: Zero check
-
+    ;; Zero check (y3 - y2 == 0, skip!)
+    beq    .skip_lower_right
 
     ;move.l vertex_x(a2),d4              ;; d4 = xa
     ;
     ; d5 -> xb, stays the same
     ;
-.lower_right_y:
-    ;; TODO: scanline
-
-    ;; this just plots the edges of the upper triangle, replace with scanline
+.lower_right_y_triseg:
+    ;;
+    ;; d1 is free to use at this stage - as it was upper short delta add (xafix)
+    ;;
+    move.l  d5, d1
     move.l  d4, d0
-    asr.l   #FIX_BITS,d0
-    move.b  #255,(a4, d0.l)
-    move.l  d5, d0
-    asr.l   #FIX_BITS,d0
-    move.b  #255,(a4, d0.l)
-    ;; end edge plotting
+    asr.l   #FIX_BITS, d1
+    asr.l   #FIX_BITS, d0
+.lower_right_y_scan:
+    move.b  #255, (a4,d1.l)
+    subq.l  #1,d1
+    cmp.l   d0,d1
+    bge     .lower_right_y_scan
 
+;; end scanline, advance to next
 
     add.l   d3,d4                   ;; xafix += dxdy3
     add.l   d2,d5                   ;; xbfix += dxdy2      
     add.l   #320,a4                 ;; advance next scanline
     subq.l  #1,d6
-    bpl     .lower_right_y
+    bpl     .lower_right_y_triseg   ;; BNE or BPL??????
+.skip_lower_right:
+    rts
+;;
+;; Long edge on the left
+;;
+
+.left_long_edge:
+
+leftedge:
+    move.l  vertex_y(a1),d0              ;; d0 = y1
+    move.l  vertex_x(a1),d5              ;; d5 = xb, do this here as we skip the setup if zero height
+
+    ;; get scanline
+    asr.l   #FIX_BITS, d0               ;; fixpoint correction 
+    ;; can be optimized, but does not work in the emulator!!!
+    mulu    goa_pixmap_width(a0),d0     ;; width * y1, this is always unsigned!
+    move.l  goa_pixmap_image(a0),a4    
+    add.l   d0, a4                      ;; a4 = pixmap->image + width * y1; (&pixmap->image[width * y1])
+
+    ;; a4 now points to the corfect scanline
+
+    move.l  vertex_x(a1),d4              ;; d4 = xa, this is actually equal to d5 at this point (starting at same point)
+
+
+
+    move.l  vertex_y(a1),d0      
+    move.l  vertex_y(a2),d6
+    sub.l   d0,d6                ;; d6 = dy = y2 - y1 (still in fix point)
+upperleft:
+    asr.l   #FIX_BITS, d6           ;; fixpoint correction 
+    beq     .skip_upper_left
+    ;;
+    ;; d5 is right hand coord (long side), this will live through
+    ;; d2 is right hand add (long side)
+    ;;
+    ;; d4 is left (upper portion)
+    push    d3
+.upper_left_y_triseg:
+
+    move.l  d4,d3    ; right edge
+    move.l  d5,d0    ; left
+    asr.l   #FIX_BITS, d0
+    asr.l   #FIX_BITS, d3
+    ;; fill scan line
+.upper_left_y_scan:
+    move.b  #255,(a4,d0.l)      ;; THIS IS CACHE UNFRIENDLY
+    addq.l  #1,d0
+    cmp.l   d3, d0
+    ble     .upper_left_y_scan
+    ;; end of scan
+
+    ;; advance left/right edges
+    add.l   d1,d4                   ;; right, xafix += dxdy1
+    add.l   d2,d5                   ;; left, xbfix += dxdy2      
+    add.l   #320,a4                 ;; advance next scanline
+
+    subq.l  #1,d6
+    bne     .upper_left_y_triseg
+    pop     d3
+    ;; end of upper triangle segment
+
+.skip_upper_left:    
+    ;; very little setup for second segment as we just continue
+    move.l vertex_y(a3),d6
+    move.l vertex_y(a2),d0
+    sub.l  d0,d6                ;; d6 = dy = y3 - y2,
+    asr.l  #FIX_BITS, d6           ;; fixpoint correction 
+    ;; Zero check (y3 - y2 == 0, skip!)
+    beq    .skip_lower_left
+
+    ;;
+    ;; d1 is free to use at this stage - as it was upper short delta add (xafix)
+    ;;
+.lower_left_y_triseg:
+    
+    move.l  d4, d1     ; right
+    asr.l   #FIX_BITS, d1
+    move.l  d5, d0     ; left
+    asr.l   #FIX_BITS, d0
+    ;; do scanline
+.lower_left_y_scan:
+    move.b  #255, (a4,d0.l)
+    addq.l  #1,d0
+    cmp.l   d1,d0
+    ble     .lower_left_y_scan
+
+    ;; end scanline, advance edges
+
+    add.l   d3,d4                   ;; right, xafix += dxdy3
+    add.l   d2,d5                   ;; left xbfix += dxdy2      
+    add.l   #320,a4                 ;; advance next scanline
+    subq.l  #1,d6
+    bne     .lower_left_y_triseg
+    ;; end triangle segment
+.skip_lower_left:
+
+
 end_of_tri:
     rts
 
@@ -521,9 +696,21 @@ MakePixmap  Macro ;
 ; Note: vertices coming in are fixpoint 24:8
 ;
 
-v1:     dc.l    160<<FIX_BITS,  0<<FIX_BITS, 0
-v2:     dc.l    100<<FIX_BITS, 80<<FIX_BITS, 0
-v3:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
+;
+; xx_right, will cause long-edge in polyfiller to be right
+;
+
+v1_right:     dc.l    160<<FIX_BITS,  0<<FIX_BITS, 0
+v2_right:     dc.l    100<<FIX_BITS, 80<<FIX_BITS, 0
+v3_right:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
+
+;
+; xx_left, will cause long-edge in polyfiller to be left
+;
+
+v1_left:     dc.l    160<<FIX_BITS,  0<<FIX_BITS, 0
+v2_left:     dc.l    200<<FIX_BITS, 80<<FIX_BITS, 0
+v3_left:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
 
 
 ;v1:     dc.l    160,  0, 0
