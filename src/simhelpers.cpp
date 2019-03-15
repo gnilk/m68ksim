@@ -9,6 +9,8 @@
 #include "osd.h"
 #include "strutil.h"
 #include "simhelpers.h"
+#include "m68kcpu.h"
+
 
 #include <amiga_hunk_parser.h>
 
@@ -39,6 +41,33 @@ bool RegisterFromString(std::string reg, m68k_register_t &outreg) {
 	}
 	return false;
 }
+
+bool GetZFlag() {
+    m68ki_cpu_core cpu;
+    m68k_get_context(&cpu);
+    return (cpu.not_z_flag?false:true); // Inverted, see m68kcpu
+}
+bool GetCFlag() {
+    m68ki_cpu_core cpu;
+    m68k_get_context(&cpu);
+    return (cpu.c_flag?true:false);
+}
+bool GetVFlag() {
+    m68ki_cpu_core cpu;
+    m68k_get_context(&cpu);
+    return (cpu.v_flag?true:false);
+}
+bool GetNFlag() {
+    m68ki_cpu_core cpu;
+    m68k_get_context(&cpu);
+    return (cpu.n_flag?true:false);
+}
+bool GetXFlag() {
+    m68ki_cpu_core cpu;
+    m68k_get_context(&cpu);
+    return (cpu.x_flag?true:false);
+}
+
 
 
 

@@ -16,7 +16,11 @@
 static const std::string glbRegnames[]={"d0","d1","d2","d3","d4","d5","d6","d7","a0","a1","a2","a3","a4","a5","a6","a7"};
 
 bool RegisterFromString(std::string reg, m68k_register_t &outreg);
-
+bool GetZFlag();
+bool GetCFlag();
+bool GetVFlag();
+bool GetNFlag();
+bool GetXFlag();
 
 class SourceLineItem {
 public:

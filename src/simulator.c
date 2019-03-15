@@ -156,9 +156,9 @@ unsigned int cpu_read_long_dasm(unsigned int address)
 /* Write data to RAM or a device */
 void cpu_write_byte(unsigned int address, unsigned int value)
 {
-	printf("cpu_write_byte: $%.8x, $%.2x\n", address, (uint8_t)(value & 0xff));
+//	printf("cpu_write_byte: $%.8x, $%.2x\n", address, (uint8_t)(value & 0xff));
 	if(g_fc & 2)	/* Program */
-		exit_error("Attempted to write %02x to ROM address %08x", value&0xff, address);
+		exit_error("Attempted to write %02x toOM address %08x", value&0xff, address);
 
 	/* Otherwise it's data space */
 	switch(address)

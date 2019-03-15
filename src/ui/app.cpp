@@ -244,12 +244,21 @@ static void ShowRegisters() {
     }
     ImGui::Columns(1);
     ImGui::Separator();
+    ImGui::Columns(2);
 
     uint32_t pc = m68k_get_reg(NULL,M68K_REG_PC);        /* Program Counter */
     uint32_t sr = m68k_get_reg(NULL,M68K_REG_SR);        /* Status Register */
     ImGui::Text("SR: $%.8x", sr);
     ImGui::Text("PC: $%.8x", pc);
-    ImGui::End();       
+    ImGui::NextColumn();
+    ImGui::Text("ZCVNX");
+    ImGui::Text("%d%d%d%d%d", 
+        GetZFlag()?1:0,
+        GetCFlag()?1:0,
+        GetVFlag()?1:0,
+        GetNFlag()?1:0,
+        GetXFlag()?1:0);
+    ImGui::End();
 }
 
 
@@ -510,7 +519,7 @@ static void ShowMainWindow() {
             // Refill history buffer from new position
             history->FillFrom(m68k_get_reg(NULL, M68K_REG_PC));
         } else {
-            printf("RT, current: %.8x, dst: %.8x\n", pcCurrent, runToPCEquals);
+            //printf("RT, current: %.8x, dst: %.8x\n", pcCurrent, runToPCEquals);
             StepExecution();
         }
 
