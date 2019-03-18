@@ -79,29 +79,19 @@ goa_pixmap_palette  rs.l GOA_PIXMAP_PALETTESIZE  ; array of GOA_RGBA
     section code
 
 test:
-
-    move.l  #4, d0
-    move.l  #2, d1
-    sub.l   d1, d0
-
-
-    move.l  #2, d0
-    move.l  #4, d1
-    sub.l   d1, d0
-
     ;
     ; I simply don't know how to autofill the pointer to the buffer in asm
     ; However, this is not an issue as it will be supplied from C/C++
     ;
+
     lea     backbuffer,a0
     lea     backbuffer_image_data,a1
     move.l  a1, goa_pixmap_image(a0)
-
     move.l  #255,d0
     lea     backbuffer,a0
-    lea     v1_right,a1
-    lea     v2_right,a2
-    lea     v3_right,a3
+    lea     v1_fail_c,a1
+    lea     v2_fail_c,a2
+    lea     v3_fail_c,a3
     bsr     drawflat
 
 ;    lea     backbuffer,a0
@@ -150,6 +140,10 @@ testpixmap:
 ;
 ; ------------------------------------
 drawflat:
+
+    push    d2-d7/a4-a5
+
+
     ;
     ; TODO: adjust coords with 0.5, which is 'add.l #FIX_BITS_HALF, d1'
     ;
@@ -198,6 +192,7 @@ drawflat:
 
     move.l (4,a2), d4
     move.l (4,a3), d5   
+
     sub.l  (4,a1), d4   ;; y2-y1
     sub.l  (4,a2), d5   ;; y3-y2
     ;; the above works for the test vertices
@@ -217,17 +212,28 @@ drawflat:
     move.l (4,a3),d6
     sub.l  (4,a1),d6   ;; d6 = y3 - y1
 
-    ;
-    ; not supported in emulator
-    ; divs.l   d4,d1       ;; d1 = dxdy1 = (x2 - x1) / (y2 - y1)
+    
+    ;; 'divs.l   d4,d1' not supported in emulator
+    ;; d1 = dxdy1 = (x2 - x1) / (y2 - y1)
+    move.l vertex_y(a2),d7
+    cmp.l  vertex_y(a1),d7
+    ble    .skip_dxdy1
     divs   d4,d1
     ext.l  d1
+.skip_dxdy1:
 
+
+    cmp.l  #0, d6
+    beq    .skip_dxdy2
     divs   d6,d2       ;; d2 = dxdy2 = (x3 - x1) / (y3 - y1)
     ext.l  d2
+.skip_dxdy2:
 
+    cmp.l  #0, d5
+    beq    .skip_dxdy3
     divs   d5,d3       ;; d3 = dxdy3 = (x3 - x2) / (y3 - y2)
     ext.l  d3
+.skip_dxdy3:
 
     ;;
     ;; calculate side, d6 - side: 0: left, 1: right
@@ -284,17 +290,16 @@ drawflat:
     ;;       =>  x1fix + (prestep * dxdyb) / (FIX_BITS_ONE) - division =  >> FIX_BITS, but '>>' is implementation specific (logical / arithmetic)
 
     muls    d2, d5                      ;; prestep * dxdyb (dxdyb = dxdy2)
-    ext.l   d5
     asr.l   #FIX_BITS, d5               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
     add.l   vertex_x(a1),d5             ;; adjust starting point for long edge: xbfix, =  (x1 + fix_fix_mul(prestep, dxdyb))
 
 
     ;; get scanline (a4 = &pixmap->image[y1 * pixmap->width])
-    ;; d7 = y1, see above
 
+    move.l  vertex_y(a1),d7              ;; d0 = y1
     asr.l   #FIX_BITS, d7               ;; fixpoint correction 
     ;; can be optimized, but does not work in the emulator!!!
-    mulu    goa_pixmap_width(a0),d7     ;; width * y1, this is always unsigned!
+    mulu.l  goa_pixmap_width(a0),d7     ;; width * y1, this is always unsigned!
     move.l  goa_pixmap_image(a0),a4    
     add.l   d7, a4                      ;; a4 = pixmap->image + width * y1; (&pixmap->image[width * y1])
     ;; a4 now points to the corfect scanline
@@ -310,7 +315,6 @@ drawflat:
     move.l  vertex_x(a1),d4              ;; d4 = xafix
     ;; prestepping for d4 (xafix), d1 - gradient, d6 is prestep value (see above)
     muls    d1, d6              ;; prestep * dxdya
-    ext.l   d6
     asr.l   #FIX_BITS, d6       ;; (prestep * dxdya) / FIX_BITS
     add.l   d6, d4              ;; x1fix + (prestep * dxdya) / FIX_BITS
     
@@ -394,7 +398,6 @@ drawflat:
     sub.l   d1, d4                      ;; d1 = prestep (1.0 - fractional(y1)), adjustument
  
     muls    d3, d4                      ;; prestep * dxdyb (dxdyb = dxdy2)
-    ext.l   d4
     asr.l   #FIX_BITS, d4               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
     add.l   vertex_x(a2),d4             ;; adjust starting point for short edge: xafix, =  (x2 + fix_fix_mul(prestep, dxdy3))
 
@@ -430,6 +433,9 @@ drawflat:
     subq.l  #1,d6
     bpl     .lower_right_y_triseg   ;; BNE or BPL??????
 .skip_lower_right:
+    ;; restore stack
+    pop     d2-d7/a4-a5
+
     rts
 
 ;;
@@ -463,21 +469,18 @@ drawflat:
 
     ;; prestep X1, long edge X-coord
     muls    d2, d5                      ;; prestep * dxdya (dxdya = dxdy2)
-    ext.l   d5
     asr.l   #FIX_BITS, d5               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
     add.l   vertex_x(a1),d5             ;; adjust starting point for long edge: xbfix, =  (x1 + fix_fix_mul(prestep, dxdyb))
 
     ;; get scanline
-;    move.l  vertex_y(a1),d7            ;; d7 = y1, from above, d7 no trashed!!!
-
+    move.l  vertex_y(a1),d7            
     asr.l   #FIX_BITS, d7               ;; fixpoint correction 
     ;; can be optimized, but does not work in the emulator!!!
-    mulu    goa_pixmap_width(a0),d7     ;; width * y1, this is always unsigned!
+    mulu.l  goa_pixmap_width(a0),d7     ;; width * y1, this is always unsigned!
     move.l  goa_pixmap_image(a0),a4    
     add.l   d7, a4                      ;; a4 = pixmap->image + width * y1; (&pixmap->image[width * y1])
 
     ;; a4 now points to the corfect scanline
-    move.l  vertex_x(a1),d4             ;; d4 = xa, this is equal to d5 at this point (starting at same point)
 
     move.l  vertex_y(a2),d7
     sub.l   vertex_y(a1),d7                    ;; d6 = dy = y2 - y1 (still in fix point)
@@ -488,12 +491,12 @@ drawflat:
     ;; Upper left segment here
 
     ;
-    ; prestepping for d4 (xafix)
+    ; prestepping for short edge (xbfix)
     ;
-    muls    d1, d6              ;; prestep * dxdya
-    ext.l   d6
-    asr.l   #FIX_BITS, d6       ;; (prestep * dxdya) / FIX_BITS
-    add.l   d6, d4              ;; x1fix + (prestep * dxdya) / FIX_BITS   
+    move.l  vertex_x(a1),d4     ;; d4 = xa, this is equal to d5 at this point (starting at same point)
+    muls    d1, d6              ;; prestep * dxdyb
+    asr.l   #FIX_BITS, d6       ;; (prestep * dxdyb) / FIX_BITS
+    add.l   d6, d4              ;; x1fix + (prestep * dxdyb) / FIX_BITS   
 
     ;;
     ;; d0 - color
@@ -551,11 +554,10 @@ drawflat:
 
     move.l  vertex_y(a2),d1
     move.l  #FIX_BITS_ONE, d4           ;;  1 << FIX_BITS (i.e. 1 in Fixpoint)
-    and.l   #FIX_BITS_MASK, d1          ;; mask out the fractional part of Y1
-    sub.l   d1, d4                      ;; d1 = prestep (1.0 - fractional(y1)), adjustument
+    and.l   #FIX_BITS_MASK, d1          ;; mask out the fractional part of Y2
+    sub.l   d1, d4                      ;; d1 = prestep (1.0 - fractional(y21)), adjustument
  
-    muls    d3, d4                      ;; prestep * dxdyb (dxdyb = dxdy2)
-    ext.l   d4
+    muls    d3, d4                      ;; prestep * dxdyb (dxdyb = dxdy3)
     asr.l   #FIX_BITS, d4               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
     add.l   vertex_x(a2),d4             ;; adjust starting point for short edge: xafix, =  (x2 + fix_fix_mul(prestep, dxdy3))
 
@@ -590,6 +592,9 @@ drawflat:
 
 
 end_of_tri:
+    ;; restore stack
+    pop     d2-d7/a4-a5
+
     rts
 
 
@@ -843,6 +848,32 @@ v3_right:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
 v1_left:     dc.l    160<<FIX_BITS,  0<<FIX_BITS, 0
 v2_left:     dc.l    180<<FIX_BITS, 80<<FIX_BITS, 0
 v3_left:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
+
+
+;;
+;; test cases that have failed
+;;
+
+; division by zero
+v1_fail_a:     dc.l    160<<FIX_BITS, 90<<FIX_BITS, 0
+v2_fail_a:     dc.l    240<<FIX_BITS, 90<<FIX_BITS, 0
+v3_fail_a:     dc.l    216<<FIX_BITS,146<<FIX_BITS, 0
+
+; division by zero
+v1_fail_b:     dc.l    160<<FIX_BITS,  90<<FIX_BITS, 0
+v2_fail_b:     dc.l    216<<FIX_BITS,  33<<FIX_BITS, 0
+v3_fail_b:     dc.l    239<<FIX_BITS,  90<<FIX_BITS, 0
+
+
+;
+; bad interpolation on lower short right edge
+; Values after float conversion
+; v1 = 100.0f:90.0f
+; v2 = 137.468002 : 19.316559
+; v3 = 176.474640 : 66.513123
+v1_fail_c:     dc.l    $6440, $2d40, 0
+v2_fail_c:     dc.l    $76fb, $09e8, 0
+v3_fail_c:     dc.l    $8a7c, $2181, 0
 
 
 ;v1:     dc.l    160,  0, 0
