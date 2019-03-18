@@ -97,6 +97,7 @@ test:
     lea     backbuffer_image_data,a1
     move.l  a1, goa_pixmap_image(a0)
 
+    move.l  #255,d0
     lea     backbuffer,a0
     lea     v1_right,a1
     lea     v2_right,a2
@@ -152,7 +153,6 @@ drawflat:
     ;
     ; TODO: adjust coords with 0.5, which is 'add.l #FIX_BITS_HALF, d1'
     ;
-
     move.l vertex_y(a1), d1   
     move.l vertex_y(a2), d2
     move.l vertex_y(a3), d3   
@@ -230,12 +230,12 @@ drawflat:
     ext.l  d3
 
     ;;
-    ;; calculate side, d0 - side: 0: left, 1: right
+    ;; calculate side, d6 - side: 0: left, 1: right
     ;;
-    moveq   #1, d0
+    moveq   #1, d6
     cmp.l  d1, d2
     bgt     .dxdy2_gt_dxdy1
-    moveq   #0, d0
+    moveq   #0, d6
 .dxdy2_gt_dxdy1:  
 
     ;; if (y1fix == y2fix)
@@ -244,17 +244,17 @@ drawflat:
     bne     .y1fix_ne_y2fix
 
     ;;   side = x1fix > x2fix;
-    moveq   #1, d0
+    moveq   #1, d6
     move.l  vertex_x(a1),d4
     cmp.l   vertex_x(a2),d4
     bgt     .y1fix_ne_y2fix
-    moveq   #0, d0
+    moveq   #0, d6
 .y1fix_ne_y2fix:  
     ;;  TODO!!!
 ;    if (y2fix == y3fix)
 ;        side = x3fix > x2fix;
 
-    cmp.l   #0,d0
+    cmp.l   #0,d6
     beq     .left_long_edge
 
 ;;
@@ -263,15 +263,10 @@ drawflat:
 .right_long_edge:
 
     ; Register allocation
-    ;  d1 - dxdy1, upper short
-    ;  d2 - dxdy2, long edge
-    ;  d3 - dxdy3, lower short
+    ;  d1 - gradient, upper short
+    ;  d2 - gradient, long edge
+    ;  d3 - gradient, lower short
     ;
-
-    ;; 
-    ;;
-    ;; TODO: Pipeline this properly
-    ;;
 
     ;;
     ;; prestepping, long edge
@@ -279,10 +274,10 @@ drawflat:
     ;;
     ;; int32_t prestep = (1<<FIX_BITS) - fix_frac(y1fix);
 
-    move.l  vertex_y(a1),d0              ;; d0 = y1
+    move.l  vertex_y(a1),d7              ;; d0 = y1
     move.l  #FIX_BITS_ONE, d5           ;;  1 << FIX_BITS (i.e. 1 in Fixpoint)
-    and.l   #FIX_BITS_MASK, d0          ;; mask out the fractional part of Y1
-    sub.l   d0, d5                      ;; d5 = prestep (1.0 - fractional(y1)), adjustument
+    and.l   #FIX_BITS_MASK, d7          ;; mask out the fractional part of Y1
+    sub.l   d7, d5                      ;; d5 = prestep (1.0 - fractional(y1)), adjustument
     move.l  d5, d6                      ;; save for later
 
     ;; xbfix = x1fix + fix_fix_mul(prestep, dxdyb);   // dxdyb = dxdy2
@@ -294,43 +289,32 @@ drawflat:
     add.l   vertex_x(a1),d5             ;; adjust starting point for long edge: xbfix, =  (x1 + fix_fix_mul(prestep, dxdyb))
 
 
-    ;; get scanline
-    move.l  vertex_y(a1),d0              ;; d0 = y1
-    asr.l   #FIX_BITS, d0               ;; fixpoint correction 
+    ;; get scanline (a4 = &pixmap->image[y1 * pixmap->width])
+    ;; d7 = y1, see above
+
+    asr.l   #FIX_BITS, d7               ;; fixpoint correction 
     ;; can be optimized, but does not work in the emulator!!!
-    mulu    goa_pixmap_width(a0),d0     ;; width * y1, this is always unsigned!
+    mulu    goa_pixmap_width(a0),d7     ;; width * y1, this is always unsigned!
     move.l  goa_pixmap_image(a0),a4    
-    add.l   d0, a4                      ;; a4 = pixmap->image + width * y1; (&pixmap->image[width * y1])
+    add.l   d7, a4                      ;; a4 = pixmap->image + width * y1; (&pixmap->image[width * y1])
     ;; a4 now points to the corfect scanline
 
-    ;; do this here, as we will reuse the value later
-    move.l  vertex_x(a1),d4              ;; d4 = xafix
 
-    ;; get the first scanline, part of this can be moved to where we dig out 'y1'
-    move.l  vertex_y(a1),d0      
+    ;; calc and check dy
     move.l  vertex_y(a2),d7
-    sub.l   d0,d7                ;; d6 = dy = y2 - y1 (still in fix point)
+    sub.l   vertex_y(a1),d7             ;; d7 = dy = y2 - y1 (still in fix point)
+    asr.l   #FIX_BITS, d7               ;; fixpoint correction 
+    beq     .skip_upper_right   
+    ;; dy (d7) > 0
 
-    asr.l   #FIX_BITS, d7           ;; fixpoint correction 
-    beq     .skip_upper_right
-
-
-    ;
-    ; prestepping for d4 (xafix)
-    ;
+    move.l  vertex_x(a1),d4              ;; d4 = xafix
+    ;; prestepping for d4 (xafix), d1 - gradient, d6 is prestep value (see above)
     muls    d1, d6              ;; prestep * dxdya
     ext.l   d6
     asr.l   #FIX_BITS, d6       ;; (prestep * dxdya) / FIX_BITS
     add.l   d6, d4              ;; x1fix + (prestep * dxdya) / FIX_BITS
     
-
-    ;;
-    ;; d5 is right hand coord (long side), this will live through
-    ;; d2 is right hand add (long side)
-    ;;
-    ;; d4 is left (upper portion)
-
-    ; d3, lower short edge gradient, need to save this
+    ;; d3, gradient, short lower edge, need to save this
     push    d3 
 ;
 ; Upper triangle segment including scanline
@@ -367,14 +351,14 @@ drawflat:
 
     ;; THIS IS THE MASTER LOOP - I don't know how to make this any tighter..
 .upper_right_y_scan:
-    move.b  #255,(a5)+      ; this is 1 cycle slower then direct but pipeline is maintained
+    move.b  d0,(a5)+      ; this is 1 cycle slower then direct but pipeline is maintained
     subq.l  #1, d6
     bpl     .upper_right_y_scan
     ;; end of scanline here
 
     add.l   d1,d4                   ;; xafix += dxdy1
     add.l   d2,d5                   ;; xbfix += dxdy2      
-    add.l   #320,a4                 ;; advance next scanline
+    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
     subq.l  #1,d7
     bne     .upper_right_y_triseg
 
@@ -434,7 +418,7 @@ drawflat:
     sub.l   d1, d6
     add.l   d1, a5
 .lower_right_y_scan:
-    move.b  #255, (a5)+
+    move.b  d0, (a5)+
     subq    #1, d6
     bpl     .lower_right_y_scan
 
@@ -442,7 +426,7 @@ drawflat:
 
     add.l   d3,d4                   ;; xafix += dxdy3
     add.l   d2,d5                   ;; xbfix += dxdy2      
-    add.l   #320,a4                 ;; advance next scanline
+    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
     subq.l  #1,d6
     bpl     .lower_right_y_triseg   ;; BNE or BPL??????
 .skip_lower_right:
@@ -532,7 +516,7 @@ drawflat:
 
     ;; fill scan line
 .upper_left_y_scan:
-    move.b  #255,(a5)+      ;; THIS IS CACHE UNFRIENDLY
+    move.b  d0,(a5)+      ;; THIS IS CACHE UNFRIENDLY
     subq.l  #1, d6
     bpl     .upper_left_y_scan
     ;; end of scan
@@ -540,7 +524,7 @@ drawflat:
     ;; advance left/right edges
     add.l   d1,d4                   ;; right, xafix += dxdy1
     add.l   d2,d5                   ;; left, xbfix += dxdy2      
-    add.l   #320,a4                 ;; advance next scanline
+    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
 
     subq.l  #1,d7
     bne     .upper_left_y_triseg
@@ -590,7 +574,7 @@ drawflat:
     add.l   d1,a5
     ;; TODO: fix this loop!!!!
 .lower_left_y_scan:
-    move.b  #255, (a5)+
+    move.b  d0, (a5)+
     subq.l  #1, d6
     bpl     .lower_left_y_scan
 
@@ -598,7 +582,7 @@ drawflat:
 
     add.l   d3,d4                   ;; right, xafix += dxdy3
     add.l   d2,d5                   ;; left xbfix += dxdy2      
-    add.l   #320,a4                 ;; advance next scanline
+    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
     subq.l  #1,d7
     bne     .lower_left_y_triseg
     ;; end triangle segment
