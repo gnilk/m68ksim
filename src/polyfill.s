@@ -347,11 +347,12 @@ drawflat:
 ; a3, v3
 ; a4, scanline pointer
 ; a5, scanline + x1 -> first pixel pointer
-; 
+; a6, prestepping value
 ;
 .upper_right_y_triseg:
     ;; I've been testing a few ways in order to pipeline the loop better, but they all produced jagged edges
     ;; This scanline version produces by far the best results...
+
     move.l  d5, d6
     move.l  d4, d3              ; d4 is the short edge
     asr.l   #FIX_BITS, d6       ; can't do asr.l on address register... pity...
@@ -372,13 +373,23 @@ drawflat:
     add.l   #320,a4                 ;; advance next scanline
     subq.l  #1,d7
     bne     .upper_right_y_triseg
-    pop     d3
+
+    pop     d3                      ;; restore lower short edge gradient
 
     ;; lower right from here
 .skip_upper_right:
 
-    ;; TODO: prestepping!!!
-
+    ; register allocation
+    ; d0 - color
+    ; d1 - free
+    ; d2 - long edge gradient - xbfix
+    ; d3 - short edge gradient
+    ; d4 - free
+    ; d5 - long edge X coordinate
+    ; d6 - free
+    ; d7 - free
+    ;
+ 
     ;; very little setup for second segment as we just continue
     move.l vertex_y(a3),d6
     move.l  vertex_y(a2),d0
@@ -387,23 +398,41 @@ drawflat:
     ;; Zero check (y3 - y2 == 0, skip!)
     beq    .skip_lower_right
 
-    ;move.l vertex_x(a2),d4              ;; d4 = xa
-    ;
-    ; d5 -> xb, stays the same
+
+    ;; prestepping of lower short edge
+    move.l  vertex_y(a2),d1             ;; 
+    move.l  #FIX_BITS_ONE, d4           ;;  1 << FIX_BITS (i.e. 1 in Fixpoint)
+    and.l   #FIX_BITS_MASK, d1          ;; mask out the fractional part of Y1
+    sub.l   d1, d4                      ;; d1 = prestep (1.0 - fractional(y1)), adjustument
+ 
+    muls    d3, d4                      ;; prestep * dxdyb (dxdyb = dxdy2)
+    ext.l   d4
+    asr.l   #FIX_BITS, d4               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
+    add.l   vertex_x(a2),d4             ;; adjust starting point for short edge: xafix, =  (x2 + fix_fix_mul(prestep, dxdy3))
+
+
+    ; register allocation
+    ; d0 - color
+    ; d1 - free/scratch
+    ; d2 - long edge gradient - xbfix
+    ; d3 - short edge gradient
+    ; d4 - short edge X coordinate
+    ; d5 - long edge  X coordinate
+    ; d6 - scan loop counter (X)
+    ; d7 - scanline counter (Y)
     ;
 .lower_right_y_triseg:
-    ;;
-    ;; d1 is free to use at this stage - as it was upper short delta add (xafix)
-    ;;
-    move.l  d5, d1
-    move.l  d4, d0
+    move.l  d5, d6      ;; 
+    move.l  d4, d1      ;; d4 is short edge, d1 was used for upper and is now free
+    asr.l   #FIX_BITS, d6
     asr.l   #FIX_BITS, d1
-    asr.l   #FIX_BITS, d0
+    move.l  a4, a5
+    sub.l   d1, d6
+    add.l   d1, a5
 .lower_right_y_scan:
-    move.b  #255, (a4,d0.l)
-    addq.l  #1,d0
-    cmp.l   d1,d0
-    ble     .lower_right_y_scan
+    move.b  #255, (a5)+
+    subq    #1, d6
+    bpl     .lower_right_y_scan
 
 ;; end scanline, advance to next
 
