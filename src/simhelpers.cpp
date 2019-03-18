@@ -216,8 +216,12 @@ void SourceLineDebug::ParseAHPLineInfo(AHPSection *section, AHPLineInfo *lineInf
 	if (f == NULL) {
 		f = tryOpen("..",lineInfo->filename);
 		if (f == NULL) {
+			f = fopen(lineInfo->filename,"r");	// try absolute path
+			if (f == NULL) {
 			// TODO: add specific search paths to some kind of config
-			printf("FAILED TO OPEN: %s\n", lineInfo->filename);
+				printf("FAILED TO OPEN: %s\n", lineInfo->filename);
+				exit(1);
+			}
 		}
 	}
 	printf("Source file: %s opened, mapped line: %d\n", lineInfo->filename, lineInfo->count);
