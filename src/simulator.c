@@ -539,8 +539,9 @@ uint32_t sim_stack_top() {
 // sim_begin, initializes the simulator
 //
 int sim_begin() {
+	m68k_set_cpu_type(M68K_CPU_TYPE_68020);
 	m68k_init();
-	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
+	//m68k_set_cpu_type(M68K_CPU_TYPE_68000);
 	m68k_pulse_reset();
 	input_device_reset();
 	output_device_reset();

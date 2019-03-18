@@ -1,3 +1,10 @@
+;
+; simple chunky polyfiller for 680x0 - all registers used (except a6)
+; TODO:
+;  + prestepping (subpixel)
+;  - pipelining for 68060
+;  - investigate FIX_BITS for 060, want more than 8 - not sure this works...
+;  - reuse pixel loop from '.upper_right_y_triseg:'
 
 ;
 ; core GOA assembler definitions
@@ -5,10 +12,12 @@
 GOA_PIXMAP_PALETTESIZE equ 256
 
 ;
-; higher will cause problems with division
+; higher will cause problems with division (only < 68040????)
 ;
-FIX_BITS equ 7
-
+FIX_BITS        equ 7
+FIX_BITS_ONE    equ (1<<FIX_BITS)
+FIX_BITS_HALF   equ (1<<(FIX_BITS-1))
+FIX_BITS_MASK   equ (FIX_BITS_ONE - 1)
 
 push    macro
         movem.l \1,-(a7)
@@ -139,7 +148,7 @@ testpixmap:
 ; ------------------------------------
 drawflat:
     ;
-    ; NOTE: this can be pre-calculated for poly streaming
+    ; TODO: adjust coords with 0.5, which is 'add.l #FIX_BITS_HALF, d1'
     ;
 
     move.l vertex_y(a1), d1   
@@ -172,13 +181,12 @@ drawflat:
     exg    a2, a3
 .no_swap_y2_y3:
     ;
-    ; coordinates sorted
+    ; coordinates sorted (a1,a2,a3 points correctly)
     ;
 
     ;
     ; slope calculation, this should be pipelined ok
     ;
-
     move.l (0,a2),d1
     move.l (0,a3),d2
     sub.l  (0,a1),d1    ;; d1 = (x2 - x1)
@@ -191,9 +199,7 @@ drawflat:
     sub.l  (4,a1), d4   ;; y2-y1
     sub.l  (4,a2), d5   ;; y3-y2
     ;; the above works for the test vertices
-    
-slopecalc:
-    
+        
     ;;
     ;; todo pipe line this!!!  had a pipelined version but needed more clarity when debugging!!
     ;;
@@ -221,8 +227,9 @@ slopecalc:
     divs   d5,d3       ;; d3 = dxdy3 = (x3 - x2) / (y3 - y2)
     ext.l  d3
 
-sidecalc:
-
+    ;;
+    ;; calculate side, d0 - side: 0: left, 1: right
+    ;;
     moveq   #1, d0
     cmp.l  d1, d2
     bgt     .dxdy2_gt_dxdy1
@@ -252,32 +259,66 @@ sidecalc:
 ;; the code below works for long-edge on right-hand side!
 ;;
 .right_long_edge:
+
+    ; Register allocation
+    ;  d1 - dxdy1,  d2 - dxdy2,   d3 - dxdy3
+    ;
+
     ;; 
     ;;
     ;; TODO: Pipeline this properly
     ;;
+
+    ;;
+    ;; prestepping, long edge
+    ;;      no prestepping: move.l  vertex_x(a1),d5              ;; d5 = xb, do this here as we skip the setup if zero height
+    ;;
+    ;; int32_t prestep = (1<<FIX_BITS) - fix_frac(y1fix);
+
     move.l  vertex_y(a1),d0              ;; d0 = y1
-    move.l  vertex_x(a1),d5              ;; d5 = xb, do this here as we skip the setup if zero height
+    move.l  #FIX_BITS_ONE, d5           ;;  1 << FIX_BITS (i.e. 1 in Fixpoint)
+    and.l   #FIX_BITS_MASK, d0          ;; mask out the fractional part of Y1
+    sub.l   d0, d5                      ;; d5 = prestep (1.0 - fractional(y1)), adjustument
+    move.l  d5, d6                      ;; save for later
+
+    ;; xbfix = x1fix + fix_fix_mul(prestep, dxdyb);   // dxdyb = dxdy2
+    ;;       =>  x1fix + (prestep * dxdyb) / (FIX_BITS_ONE) - division =  >> FIX_BITS, but '>>' is implementation specific (logical / arithmetic)
+
+    muls    d2, d5                      ;; prestep * dxdyb (dxdyb = dxdy2)
+    ext.l   d5
+    asr.l   #FIX_BITS, d5               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
+    add.l   vertex_x(a1),d5             ;; adjust starting point for long edge: xbfix, =  (x1 + fix_fix_mul(prestep, dxdyb))
+
 
     ;; get scanline
+    move.l  vertex_y(a1),d0              ;; d0 = y1
     asr.l   #FIX_BITS, d0               ;; fixpoint correction 
     ;; can be optimized, but does not work in the emulator!!!
     mulu    goa_pixmap_width(a0),d0     ;; width * y1, this is always unsigned!
     move.l  goa_pixmap_image(a0),a4    
     add.l   d0, a4                      ;; a4 = pixmap->image + width * y1; (&pixmap->image[width * y1])
-
     ;; a4 now points to the corfect scanline
 
-    move.l  vertex_x(a1),d4              ;; d4 = xa
-
+    ;; do this here, as we will reuse the value later
+    move.l  vertex_x(a1),d4              ;; d4 = xafix
 
     ;; get the first scanline, part of this can be moved to where we dig out 'y1'
     move.l  vertex_y(a1),d0      
-    move.l  vertex_y(a2),d6
-    sub.l   d0,d6                ;; d6 = dy = y2 - y1 (still in fix point)
+    move.l  vertex_y(a2),d7
+    sub.l   d0,d7                ;; d6 = dy = y2 - y1 (still in fix point)
 
-    asr.l   #FIX_BITS, d6           ;; fixpoint correction 
+    asr.l   #FIX_BITS, d7           ;; fixpoint correction 
     beq     .skip_upper_right
+
+
+    ;
+    ; prestepping for d4 (xafix)
+    ;
+    muls    d1, d6              ;; prestep * dxdya
+    ext.l   d6
+    asr.l   #FIX_BITS, d6       ;; (prestep * dxdya) / FIX_BITS
+    add.l   d6, d4              ;; x1fix + (prestep * dxdya) / FIX_BITS
+    
 
     ;;
     ;; d5 is right hand coord (long side), this will live through
@@ -285,31 +326,59 @@ sidecalc:
     ;;
     ;; d4 is left (upper portion)
 
-    push    d3
+    ; d3, lower short edge gradient, need to save this
+    push    d3 
+;
+; Upper triangle segment including scanline
+;
+; register allcation
+; d0, color
+; d1, short edge gradient
+; d2, long edge gradient
+; d3, scratch - used for internal calculations 
+; d4, short edge
+; d5, long edge
+; d6, scanloop-counter
+; d7, scanline-counter
+; 
+; a0, pointer to pixmap
+; a1, v1
+; a2, v2
+; a3, v3
+; a4, scanline pointer
+; a5, scanline + x1 -> first pixel pointer
+; 
+;
 .upper_right_y_triseg:
     ;; I've been testing a few ways in order to pipeline the loop better, but they all produced jagged edges
     ;; This scanline version produces by far the best results...
-    move.l  d5, d3
-    move.l  d4, d0
+    move.l  d5, d6
+    move.l  d4, d3              ; d4 is the short edge
+    asr.l   #FIX_BITS, d6       ; can't do asr.l on address register... pity...
     asr.l   #FIX_BITS, d3
-    asr.l   #FIX_BITS, d0
+    move.l  a4, a5
+    sub.l   d3,d6               ; d6 is loop
+    add.l   d3,a5               ; a5 points at first pixel of scanline
 
+    ;; THIS IS THE MASTER LOOP - I don't know how to make this any tighter..
 .upper_right_y_scan:
-    move.b  #255,(a4,d0.l)
-    addq.l  #1,d0
-    cmp.l   d3,d0
-    ble     .upper_right_y_scan
+    move.b  #255,(a5)+      ; this is 1 cycle slower then direct but pipeline is maintained
+    subq.l  #1, d6
+    bpl     .upper_right_y_scan
     ;; end of scanline here
 
     add.l   d1,d4                   ;; xafix += dxdy1
     add.l   d2,d5                   ;; xbfix += dxdy2      
     add.l   #320,a4                 ;; advance next scanline
-    subq.l  #1,d6
+    subq.l  #1,d7
     bne     .upper_right_y_triseg
     pop     d3
 
     ;; lower right from here
 .skip_upper_right:
+
+    ;; TODO: prestepping!!!
+
     ;; very little setup for second segment as we just continue
     move.l vertex_y(a3),d6
     move.l  vertex_y(a2),d0
@@ -350,8 +419,6 @@ sidecalc:
 ;;
 
 .left_long_edge:
-
-leftedge:
     move.l  vertex_y(a1),d0              ;; d0 = y1
     move.l  vertex_x(a1),d5              ;; d5 = xb, do this here as we skip the setup if zero height
 
@@ -364,14 +431,12 @@ leftedge:
 
     ;; a4 now points to the corfect scanline
 
-    move.l  vertex_x(a1),d4              ;; d4 = xa, this is actually equal to d5 at this point (starting at same point)
-
-
+    move.l  vertex_x(a1),d4              ;; d4 = xa, this is equal to d5 at this point (starting at same point)
 
     move.l  vertex_y(a1),d0      
     move.l  vertex_y(a2),d6
     sub.l   d0,d6                ;; d6 = dy = y2 - y1 (still in fix point)
-upperleft:
+
     asr.l   #FIX_BITS, d6           ;; fixpoint correction 
     beq     .skip_upper_left
     ;;
