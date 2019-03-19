@@ -19,13 +19,20 @@ set(CMAKE_BUILD_TYPE Debug)
 
 include_directories("${PROJECT_SOURCE_DIR}")
 
+option(DO_BUILD_GLFW, "Build GLFW from source rather than using the installed library" OFF)
+
 
 # sim core 
 list(APPEND srcsim_lib src/simhelpers.cpp src/strutil.cpp src/simulator.c src/m68kcpu.c src/m68kdasm.c)
 list(APPEND srcsim_lib dep/AmigaHunkParser/amiga_hunk_parser.c)
 
 # generated src
-list(APPEND srcsim_gen src/m68kops.c src/m68kopac.c src/m68kopdm.c src/m68kopnz.c)
+#list(APPEND srcsim_gen src/m68kops.c src/m68kopac.c src/m68kopdm.c src/m68kopnz.c)
+list(APPEND srcsim_gen ${CMAKE_CURRENT_BINARY_DIR}/m68kops.c)
+list(APPEND srcsim_gen ${CMAKE_CURRENT_BINARY_DIR}/m68kopac.c)
+list(APPEND srcsim_gen ${CMAKE_CURRENT_BINARY_DIR}/m68kopdm.c)
+list(APPEND srcsim_gen ${CMAKE_CURRENT_BINARY_DIR}/m68kopnz.c)
+
 #console app
 list(APPEND srcsim_con src/sim.cpp)
 # generator
@@ -57,13 +64,14 @@ set_property(TARGET sim PROPERTY CXX_STANDARD 11)
 target_include_directories(generator PUBLIC ./include)
 target_include_directories(sim PRIVATE /usr/local/include)
 target_include_directories(sim PRIVATE dep/AmigaHunkParser)
-
+target_include_directories(sim PRIVATE src)
+target_include_directories(sim PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 add_custom_command(
-		TARGET ${srcsim_gen}
-		COMMAND generator
+		OUTPUT ${srcsim_gen}
+		COMMAND generator ${CMAKE_CURRENT_BINARY_DIR}
 		WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/src
-		DEPENDS generator)
+		DEPENDS generator src/m68k_in.c)
 
 add_custom_command(
 		OUTPUT polyfill.exe
@@ -94,7 +102,22 @@ find_library(IOKIT_FRAMEWORK IOKit)
 find_library(CORE_FRAMEWORK CoreFoundation)
 find_library(CORE_VIDEO_FRAMEWORK CoreVideo)
 find_library(OPENGL_FRAMEWORK OpenGL)
-find_library(GLFW NAMES libglfw3.a PATHS)
+
+if (DO_BUILD_GLFW)
+	#
+	# If we want to specify options to GLFW's configuration, e.g. build as shared library:
+	# set(BUILD_SHARED_LIBS ON CACHE BOOL "Build GLFW as shared library")
+	# Then maybe this should be moved into a CMakeLists.txt in "dep/" instead so any options
+	# wont affect the rest of GOA.
+	#
+	set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "GLFW examples")
+	set(GLFW_BUILD_TESTS OFF CACHE BOOL "GLFW tests")
+	set(GLFW_BUILD_DOCS OFF CACHE BOOL "GLFW docs")
+	add_subdirectory(dep/glfw)
+	set(GLFW glfw)
+else()
+	find_library(GLFW NAMES libglfw3.a PATHS)
+endif()
 
 message(STATUS "Cocoa Framework path: ${COCOA_FRAMEWORK}")
 message(STATUS "OpenGL Framework path: ${OPENGL_FRAMEWORK}")
@@ -112,5 +135,7 @@ target_include_directories(dbgui PRIVATE dep/imgui/examples)
 target_include_directories(dbgui PRIVATE dep/imgui/examples/libs/gl3w)
 target_include_directories(dbgui PRIVATE dep/AmigaHunkParser)
 target_include_directories(dbgui PRIVATE dep/ImGuiColorTextEdit)
+target_include_directories(dbgui PRIVATE src)
+target_include_directories(dbgui PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 set_property(TARGET dbgui PROPERTY CXX_STANDARD 11)
