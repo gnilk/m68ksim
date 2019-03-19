@@ -76,9 +76,71 @@ goa_pixmap_reserved rs.l 1  ; pointer
 goa_pixmap_num_refs rs.l 1  ; pointer
 goa_pixmap_palette  rs.l GOA_PIXMAP_PALETTESIZE  ; array of GOA_RGBA
 
+
+
+        rsreset
+pf_side         rs.l 1
+pf_dxdy_long    rs.l 1
+pf_pres_long    rs.l 1
+pf_xfix_long    rs.l 1
+pf_xmid_long    rs.l 1
+pf_xend_long    rs.l 1
+
+pf_valid_up     rs.l 1
+pf_dxdy_up      rs.l 1
+pf_pres_up      rs.l 1
+pf_xfix_up      rs.l 1
+
+pf_valid_down   rs.l 1
+pf_dxdy_down    rs.l 1
+pf_pres_down    rs.l 1
+pf_xfix_down    rs.l 1
+pf_ffm_down     rs.l 1
+
+pf_dxdy1        rs.l 1
+pf_dxdy2        rs.l 1
+pf_dxdy3        rs.l 1
+
+
     section code
 
 test:
+    nop
+
+;dxdy1: fffeaaab:0
+;dxdy2: ffffff81:ffffff81
+    move.l  #$fffeaaab,d1
+    move.l  #$ffffff81,d2
+
+    moveq   #1, d6
+    cmp.l   d1, d2
+    bgt     .dxdy2_gt_dxdy1
+    moveq   #0, d6
+.dxdy2_gt_dxdy1:  
+
+    move.l  #$0,d1
+    move.l  #$ffffff81,d2
+
+    moveq   #1, d6
+    cmp.l   d1, d2
+    bgt     .dxdy2_gt_dxdy1_b
+    moveq   #0, d6
+.dxdy2_gt_dxdy1_b:  
+
+
+    move.l  #$2d,d4
+    move.l  #$fffffe51,d3
+    muls.l  d3, d4                      ;; prestep * dxdyb (dxdyb = dxdy3)  
+    asr.l   #FIX_BITS, d4               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
+    ;;             C          asm
+    ;; ffm....: ffffff02 : ffffff01
+    ;;
+    ;;
+
+
+    move.l #$1234,d0
+    and.l  #$ff,d0
+
     ;
     ; I simply don't know how to autofill the pointer to the buffer in asm
     ; However, this is not an issue as it will be supplied from C/C++
@@ -89,10 +151,11 @@ test:
     move.l  a1, goa_pixmap_image(a0)
     move.l  #255,d0
     lea     backbuffer,a0
-    lea     v1_fail_c,a1
-    lea     v2_fail_c,a2
-    lea     v3_fail_c,a3
-    bsr     drawflat
+    lea     v1_fail_d,a1
+    lea     v2_fail_d,a2
+    lea     v3_fail_d,a3
+    lea     pf_debug_data, a6
+    bsr     _fp_poly_singlecolor_dbg
 
 ;    lea     backbuffer,a0
 ;    lea     v1_left,a1
@@ -117,10 +180,23 @@ testpixmap:
     bne     .loop
     rts
 
+
+
+
+
 ; ------------------------------------
 ;
 ; Subpixel corrected single color triangle filler, no Z-buffer
+;
+; This version has correct interpolation
+; TODO: 
+;  - verify end-point for long edge
+;  - verify when upper segment has zero scanlines (doesn't draw anything right now)
+;  - check all loops for correct d6/d7 usage
 ; 
+; Main thing:
+; 1) Don't calculate DY in fix-point space and afterwards move back to int!
+; 2) Use BNE not BPL
 ;
 ; d0: color
 ;
@@ -128,6 +204,7 @@ testpixmap:
 ; a1: v1, fp: 24:8
 ; a2: v2, fp: 24:8
 ; a3: v3, fp: 24:8
+; a6: pointer to debug info (pf_xxx) result structure
 ;
 ; NOTE: the number of FIX_POINT_BITS is critical, 6 is too low
 ;
@@ -139,13 +216,11 @@ testpixmap:
 ;
 ;
 ; ------------------------------------
-drawflat:
+_fp_poly_singlecolor_dbg:
 
     push    d2-d7/a4-a5
-
-
     ;
-    ; TODO: adjust coords with 0.5, which is 'add.l #FIX_BITS_HALF, d1'
+    ; TODO: adjust coords with 0.5, which is 'add.l #FIX_BITS_HALF, d1' - or leave this to the caller
     ;
     move.l vertex_y(a1), d1   
     move.l vertex_y(a2), d2
@@ -218,28 +293,31 @@ drawflat:
     move.l vertex_y(a2),d7
     cmp.l  vertex_y(a1),d7
     ble    .skip_dxdy1
-    divs   d4,d1
-    ext.l  d1
+    divs.l d4,d1
 .skip_dxdy1:
 
 
     cmp.l  #0, d6
     beq    .skip_dxdy2
-    divs   d6,d2       ;; d2 = dxdy2 = (x3 - x1) / (y3 - y1)
-    ext.l  d2
+    divs.l d6,d2       ;; d2 = dxdy2 = (x3 - x1) / (y3 - y1)
 .skip_dxdy2:
 
     cmp.l  #0, d5
     beq    .skip_dxdy3
-    divs   d5,d3       ;; d3 = dxdy3 = (x3 - x2) / (y3 - y2)
-    ext.l  d3
+    divs.l d5,d3       ;; d3 = dxdy3 = (x3 - x2) / (y3 - y2)
 .skip_dxdy3:
+
+    move.l  d1,pf_dxdy1(a6)
+    move.l  d2,pf_dxdy2(a6)
+    move.l  d3,pf_dxdy3(a6)
+    
 
     ;;
     ;; calculate side, d6 - side: 0: left, 1: right
     ;;
+    ;;  int32_t side = dxdy2 > dxdy1;
     moveq   #1, d6
-    cmp.l  d1, d2
+    cmp.l   d1, d2
     bgt     .dxdy2_gt_dxdy1
     moveq   #0, d6
 .dxdy2_gt_dxdy1:  
@@ -268,6 +346,10 @@ drawflat:
 ;;
 .right_long_edge:
 
+
+
+    move.l  #1,pf_side(a6)
+
     ; Register allocation
     ;  d1 - gradient, upper short
     ;  d2 - gradient, long edge
@@ -286,12 +368,19 @@ drawflat:
     sub.l   d7, d5                      ;; d5 = prestep (1.0 - fractional(y1)), adjustument
     move.l  d5, d6                      ;; save for later
 
+
+    move.l  d5,pf_pres_long(a6)
+
     ;; xbfix = x1fix + fix_fix_mul(prestep, dxdyb);   // dxdyb = dxdy2
     ;;       =>  x1fix + (prestep * dxdyb) / (FIX_BITS_ONE) - division =  >> FIX_BITS, but '>>' is implementation specific (logical / arithmetic)
 
     muls    d2, d5                      ;; prestep * dxdyb (dxdyb = dxdy2)
     asr.l   #FIX_BITS, d5               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
     add.l   vertex_x(a1),d5             ;; adjust starting point for long edge: xbfix, =  (x1 + fix_fix_mul(prestep, dxdyb))
+
+
+    move.l  d5,pf_xfix_long(a6)
+    move.l  d2,pf_dxdy_long(a6)
 
 
     ;; get scanline (a4 = &pixmap->image[y1 * pixmap->width])
@@ -307,16 +396,26 @@ drawflat:
 
     ;; calc and check dy
     move.l  vertex_y(a2),d7
-    sub.l   vertex_y(a1),d7             ;; d7 = dy = y2 - y1 (still in fix point)
+    move.l  vertex_y(a1),d4
+    asr.l   #FIX_BITS, d4               ;; fixpoint correction 
     asr.l   #FIX_BITS, d7               ;; fixpoint correction 
+    sub.l   d4,d7             ;; d7 = dy = y2 - y1 (still in fix point)
     beq     .skip_upper_right   
     ;; dy (d7) > 0
+
+
+    move.l  d6,pf_pres_up(a6)
 
     move.l  vertex_x(a1),d4              ;; d4 = xafix
     ;; prestepping for d4 (xafix), d1 - gradient, d6 is prestep value (see above)
     muls    d1, d6              ;; prestep * dxdya
     asr.l   #FIX_BITS, d6       ;; (prestep * dxdya) / FIX_BITS
     add.l   d6, d4              ;; x1fix + (prestep * dxdya) / FIX_BITS
+
+    move.l  #1,pf_valid_up(a6)
+    move.l  d1,pf_dxdy_up(a6)
+    move.l  d4,pf_xfix_up(a6)
+
     
     ;; d3, gradient, short lower edge, need to save this
     push    d3 
@@ -358,6 +457,9 @@ drawflat:
     move.b  d0,(a5)+      ; this is 1 cycle slower then direct but pipeline is maintained
     subq.l  #1, d6
     bpl     .upper_right_y_scan
+;    move.b  d0,(a5)      ; this is 1 cycle slower then direct but pipeline is maintained
+;    move.b  d0,(a5,d6.l)      ; this is 1 cycle slower then direct but pipeline is maintained
+
     ;; end of scanline here
 
     add.l   d1,d4                   ;; xafix += dxdy1
@@ -368,6 +470,7 @@ drawflat:
 
     pop     d3                      ;; restore lower short edge gradient
 
+    move.l  d5,pf_xmid_long(a6)
     ;; lower right from here
 .skip_upper_right:
 
@@ -383,10 +486,11 @@ drawflat:
     ;
  
     ;; very little setup for second segment as we just continue
-    move.l vertex_y(a3),d6
-    move.l  vertex_y(a2),d1
-    sub.l  d1,d6                ;; d6 = dy = y3 - y2
-    asr.l  #FIX_BITS, d6           ;; fixpoint correction 
+    move.l vertex_y(a3),d7
+    move.l vertex_y(a2),d1
+    asr.l  #FIX_BITS, d7           ;; fixpoint correction 
+    asr.l  #FIX_BITS, d1           ;; fixpoint correction 
+    sub.l  d1,d7                ;; d6 = dy = y3 - y2
     ;; Zero check (y3 - y2 == 0, skip!)
     beq    .skip_lower_right
 
@@ -396,10 +500,18 @@ drawflat:
     move.l  #FIX_BITS_ONE, d4           ;;  1 << FIX_BITS (i.e. 1 in Fixpoint)
     and.l   #FIX_BITS_MASK, d1          ;; mask out the fractional part of Y1
     sub.l   d1, d4                      ;; d1 = prestep (1.0 - fractional(y1)), adjustument
+
+    move.l  d4,pf_pres_down(a6)
+
  
     muls    d3, d4                      ;; prestep * dxdyb (dxdyb = dxdy2)
     asr.l   #FIX_BITS, d4               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
     add.l   vertex_x(a2),d4             ;; adjust starting point for short edge: xafix, =  (x2 + fix_fix_mul(prestep, dxdy3))
+
+
+    move.l  #1,pf_valid_down(a6)
+    move.l  d3,pf_dxdy_down(a6)
+    move.l  d4,pf_xfix_down(a6)
 
 
     ; register allocation
@@ -430,9 +542,12 @@ drawflat:
     add.l   d3,d4                   ;; xafix += dxdy3
     add.l   d2,d5                   ;; xbfix += dxdy2      
     add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
-    subq.l  #1,d6
-    bpl     .lower_right_y_triseg   ;; BNE or BPL??????
+    subq.l  #1,d7
+    bne     .lower_right_y_triseg   ;; BNE or BPL??????
 .skip_lower_right:
+
+    move.l  d5,pf_xend_long(a6)
+
     ;; restore stack
     pop     d2-d7/a4-a5
 
@@ -457,6 +572,9 @@ drawflat:
     ; subpixel correction on v1 for long edge
     ; this should be done regardless if upper or lower is segment
 
+    move.l  #0,pf_side(a6)
+
+
     ;; int32_t prestep = (1<<FIX_BITS) - fix_frac(y1fix);
     move.l  vertex_y(a1),d7              ;; d0 = y1
     move.l  #FIX_BITS_ONE, d5           ;;  1 << FIX_BITS (i.e. 1 in Fixpoint)
@@ -464,13 +582,19 @@ drawflat:
     sub.l   d7, d5                      ;; d5 = prestep (1.0 - fractional(y1)), adjustument
     move.l  d5, d6                      ;; save for later
 
+    move.l  d5,pf_pres_long(a6)
+
     ;; xbfix = x1fix + fix_fix_mul(prestep, dxdyb);   // dxdyb = dxdy2
     ;;       =>  x1fix + (prestep * dxdyb) / (FIX_BITS_ONE) - division =  >> FIX_BITS, but '>>' is implementation specific (logical / arithmetic)
 
     ;; prestep X1, long edge X-coord
-    muls    d2, d5                      ;; prestep * dxdya (dxdya = dxdy2)
+    muls.l  d2, d5                      ;; prestep * dxdya (dxdya = dxdy2)
     asr.l   #FIX_BITS, d5               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
     add.l   vertex_x(a1),d5             ;; adjust starting point for long edge: xbfix, =  (x1 + fix_fix_mul(prestep, dxdyb))
+
+    move.l  d5,pf_xfix_long(a6)
+    move.l  d2,pf_dxdy_long(a6)
+
 
     ;; get scanline
     move.l  vertex_y(a1),d7            
@@ -483,9 +607,11 @@ drawflat:
     ;; a4 now points to the corfect scanline
 
     move.l  vertex_y(a2),d7
-    sub.l   vertex_y(a1),d7                    ;; d6 = dy = y2 - y1 (still in fix point)
-
     asr.l   #FIX_BITS, d7           ;; fixpoint correction 
+    move.l   vertex_y(a1),d4                    ;; d6 = dy = y2 - y1 (still in fix point)
+    asr.l   #FIX_BITS, d4           ;; fixpoint correction 
+
+    sub.l   d4,d7
     beq     .skip_upper_left
 
     ;; Upper left segment here
@@ -493,10 +619,19 @@ drawflat:
     ;
     ; prestepping for short edge (xbfix)
     ;
+
+    move.l  #1,pf_valid_up(a6)
+    move.l  d6,pf_pres_up(a6)
+    move.l  d1,pf_dxdy_up(a6)
+
+
     move.l  vertex_x(a1),d4     ;; d4 = xa, this is equal to d5 at this point (starting at same point)
-    muls    d1, d6              ;; prestep * dxdyb
+    muls.l  d1, d6              ;; prestep * dxdyb
     asr.l   #FIX_BITS, d6       ;; (prestep * dxdyb) / FIX_BITS
     add.l   d6, d4              ;; x1fix + (prestep * dxdyb) / FIX_BITS   
+
+
+    move.l d4,pf_xfix_up(a6)
 
     ;;
     ;; d0 - color
@@ -519,7 +654,7 @@ drawflat:
 
     ;; fill scan line
 .upper_left_y_scan:
-    move.b  d0,(a5)+      ;; THIS IS CACHE UNFRIENDLY
+    move.b  d0,(a5)+      
     subq.l  #1, d6
     bpl     .upper_left_y_scan
     ;; end of scan
@@ -530,17 +665,20 @@ drawflat:
     add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
 
     subq.l  #1,d7
-    bne     .upper_left_y_triseg
+    bne     .upper_left_y_triseg    ;; XXXXXXX - bpl gives one more pixel... 
     pop     d3
     ;; end of upper triangle segment
+
+    move.l  d5,pf_xmid_long(a6)
 
 .skip_upper_left:    
 
     ;; very little setup for second segment as we just continue
     move.l vertex_y(a3),d7
     move.l vertex_y(a2),d1
+    asr.l  #FIX_BITS,d7           ;; fixpoint correction 
+    asr.l  #FIX_BITS,d1
     sub.l  d1,d7                ;; d6 = dy = y3 - y2,
-    asr.l  #FIX_BITS, d7           ;; fixpoint correction 
     ;; Zero check (y3 - y2 == 0, skip!)
     beq    .skip_lower_left
 
@@ -556,10 +694,22 @@ drawflat:
     move.l  #FIX_BITS_ONE, d4           ;;  1 << FIX_BITS (i.e. 1 in Fixpoint)
     and.l   #FIX_BITS_MASK, d1          ;; mask out the fractional part of Y2
     sub.l   d1, d4                      ;; d1 = prestep (1.0 - fractional(y21)), adjustument
+
+    move.l  d4,pf_pres_down(a6)
+
  
-    muls    d3, d4                      ;; prestep * dxdyb (dxdyb = dxdy3)
+    muls.l  d3, d4                      ;; prestep * dxdyb (dxdyb = dxdy3)  
     asr.l   #FIX_BITS, d4               ;; fix_fix_mul = (x * y) / (fix_bits)  => arithmetic shift right
+
+    move.l  d4,pf_ffm_down(a6)
+
     add.l   vertex_x(a2),d4             ;; adjust starting point for short edge: xafix, =  (x2 + fix_fix_mul(prestep, dxdy3))
+
+
+    move.l  #1,pf_valid_down(a6)
+    move.l  d4,pf_xfix_down(a6)
+    move.l  d3,pf_dxdy_down(a6)
+
 
     ;;
     ;; d1 is free to use at this stage - as it was upper short delta add (xafix)
@@ -589,13 +739,14 @@ drawflat:
     bne     .lower_left_y_triseg
     ;; end triangle segment
 .skip_lower_left:
+    move.l  d5,pf_xend_long(a6)
 
-
-end_of_tri:
     ;; restore stack
     pop     d2-d7/a4-a5
-
     rts
+
+
+
 
 
 ; ------------------------------------
@@ -854,27 +1005,28 @@ v3_left:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
 ;; test cases that have failed
 ;;
 
-; division by zero
+; FIXED: division by zero
 v1_fail_a:     dc.l    160<<FIX_BITS, 90<<FIX_BITS, 0
 v2_fail_a:     dc.l    240<<FIX_BITS, 90<<FIX_BITS, 0
 v3_fail_a:     dc.l    216<<FIX_BITS,146<<FIX_BITS, 0
 
-; division by zero
+; FIXED: division by zero
 v1_fail_b:     dc.l    160<<FIX_BITS,  90<<FIX_BITS, 0
 v2_fail_b:     dc.l    216<<FIX_BITS,  33<<FIX_BITS, 0
 v3_fail_b:     dc.l    239<<FIX_BITS,  90<<FIX_BITS, 0
+ 
+; FIXED: no segment drawn, due to division problems => wrong side
+v1_fail_c:     dc.l    $3240, $2d40, 0
+v2_fail_c:     dc.l    $1602, $4993, 0
+v3_fail_c:     dc.l    $0a40, $2d4f, 0
+
+; no segment drawn, due to division problems => wrong side
+v1_fail_d:     dc.l    $3240, $2d40, 0
+v2_fail_d:     dc.l    $15de, $496f, 0
+v3_fail_d:     dc.l    $0a40, $2d1c, 0
 
 
-;
-; bad interpolation on lower short right edge
-; Values after float conversion
-; v1 = 100.0f:90.0f
-; v2 = 137.468002 : 19.316559
-; v3 = 176.474640 : 66.513123
-v1_fail_c:     dc.l    $6440, $2d40, 0
-v2_fail_c:     dc.l    $76fb, $09e8, 0
-v3_fail_c:     dc.l    $8a7c, $2181, 0
-
+pf_debug_data: ds.b     4*32
 
 ;v1:     dc.l    160,  0, 0
 ;v2:     dc.l    100, 80, 0
