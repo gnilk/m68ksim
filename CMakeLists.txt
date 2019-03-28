@@ -54,7 +54,8 @@ target_include_directories(imgui PUBLIC dep/imgui)
 
 add_executable(generator ${srcgen})
 add_executable(sim ${srcsim_con} ${srcsim_lib} ${srcsim_gen})
-
+# this adds support for divs.l  a, b:c
+# target_compile_definitions(sim PUBLIC M68K_USE_64_BIT)
 
 set_property(TARGET imgui PROPERTY CXX_STANDARD 11)
 

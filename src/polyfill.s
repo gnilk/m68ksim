@@ -14,10 +14,16 @@ GOA_PIXMAP_PALETTESIZE equ 256
 ;
 ; higher will cause problems with division (only < 68040????)
 ;
-FIX_BITS        equ 10
+FIX_10_BITS        equ 10
+FIX_10_BITS_ONE    equ (1<<FIX_BITS)
+FIX_10_BITS_HALF   equ (1<<(FIX_BITS-1))
+FIX_10_BITS_MASK   equ (FIX_BITS_ONE - 1)
+
+FIX_BITS        equ 7
 FIX_BITS_ONE    equ (1<<FIX_BITS)
 FIX_BITS_HALF   equ (1<<(FIX_BITS-1))
 FIX_BITS_MASK   equ (FIX_BITS_ONE - 1)
+
 
 push    macro
         movem.l \1,-(a7)
@@ -106,7 +112,7 @@ pf_dxdy3        rs.l 1
 pf_data_dxdy1        rs.l 1 ; short up
 pf_data_dxdy2        rs.l 1 ; long
 pf_data_dxdy3        rs.l 1 ; short down
-
+pf_data_pmwidth      rs.l 1
 
 pf_data_prestep      rs.l 1
 pf_data_prestep_down rs.l 1
@@ -117,9 +123,20 @@ pf_data_prestep_down rs.l 1
 
 test:
     nop
+;    move.l  #320,d3
+    move.l  #2,d3
     move.l  #16,d0
-    move.l  #$01020304,d1
-    asr.l   d0,d1
+    ;asl.l   d0,d3
+    ;move.l  #$01020304,d1
+;    move.l  #$0304,d1
+ ;   move.l  #$0102,d2
+    move.l #0,d1
+    move.l #10, d2
+;    move.l  d1,d2
+;    asr.l   d0,d2
+    asl.l   d0,d1
+
+    divs.l    d3, d2:d1
 
 
     ;
@@ -130,13 +147,35 @@ test:
     lea     backbuffer,a0
     lea     backbuffer_image_data,a1
     move.l  a1, goa_pixmap_image(a0)
-    move.l  #255,d0
-    lea     backbuffer,a0
-    lea     v1_left,a1
-    lea     v2_left,a2
-    lea     v3_left,a3
+    
+;    move.l  #255,d0
+;    lea     backbuffer,a0
+;    lea     v1_left,a1
+;    lea     v2_left,a2
+;    lea     v3_left,a3
 ;    lea     pf_debug_data, a6
-    bsr     _fp_poly_singlecolor
+;    bsr     _fp_poly_singlecolor
+
+    lea     backbuffer,a0
+    lea     v1_left_fp10,a1
+    lea     v2_left_fp10,a2
+    move.l  #255,d0
+    bsr     _fp10_drawline
+
+    lea     backbuffer,a0
+    lea     v2_left_fp10,a1
+    lea     v3_left_fp10,a2
+    move.l  #255,d0
+    bsr     _fp10_drawline
+
+    lea     backbuffer,a0
+    lea     v3_left_fp10,a1
+    lea     v1_left_fp10,a2
+    move.l  #255,d0
+    bsr     _fp10_drawline
+
+
+
 
 ;    lea     backbuffer,a0
 ;    lea     v1_left,a1
@@ -162,7 +201,481 @@ testpixmap:
     rts
 
 
+;
+; d0 - color
+;
+; a0 - pointer to pixmap
+; a1 - v1, fp: 22:10
+; a2 - v2, fp: 22:10
+;
 
+_line_draw_singlecolor:
+; ------------------------------------
+;
+; fp10_drawline - DDA Line Drawer (without anything fancy)
+;
+;   a0: pixmap
+;   a1: p1 coordinate [x,y] values -> 32bit
+;   a2: p2 coordinate [x,y] values -> 32bit
+;   d6: color
+;
+; Considering keeping it fixpoint to this level!!
+; We need some info in order to do subpixeling and stuff
+;
+; TODO:
+;    - Make interface compatible with GOA
+;      void drawline(GOA_PIXMAP8 *pixmap, float *p1, float *p2, int size, void *context)
+;    - Need to figure out how to declare a struct
+;   
+;
+_fp10_drawline:
+    push    d2-d7/a1-a3
+    move.l  #FIX_10_BITS, d7
+
+    move.l  (a1)+,d1
+    move.l  (a2)+,d3
+    move.l  (a1)+,d2
+    move.l  (a2)+,d4
+    ;
+    ; d1 = x1, fix point 22:10
+    ; d2 = y1, fix point 22:10
+    ; d3 = x2, fix point 22:10
+    ; d4 = y2, fix point 22:10
+    ;
+    cmp.l   d4,d2   
+    bmi     .y2_greater
+    exg     d1,d3
+    exg     d2,d4
+.y2_greater:
+
+    move.l  d2, d5
+    move.l  d4, d6
+    asr.l   d7, d5
+    asr.l   d7, d6
+
+    ;; y1 == y2 -> out
+    cmp.l   d5,d6
+    beq     .out
+
+    move.l  d3, d5
+    move.l  d4, d6
+    sub.l   d1, d5
+    bpl     .x_positive
+    neg.l   d5
+.x_positive:
+    sub.l   d2, d6
+
+    cmp.l   d5, d6
+    bgt     .y_greater
+    ;;  x greater
+    move.l  d3, d5
+    sub.l   d1, d5
+
+
+    move.l  d6, d4  ; d4 used as loop register
+    asr.l   d7, d4
+
+
+    asl.l   d7, d5
+    divs.l  d6, d5  
+    ;
+    ; d5 = dxdyfix
+    ;
+    asr.l   d7, d2
+    move.l  goa_pixmap_image(a0),a3
+    mulu.l  goa_pixmap_width(a0),d2
+    add.l   d2, a3
+
+    move.l  d1,d3
+    add.l   d5,d3
+
+    cmp.l   d1,d3
+    bgt     .x_no_swap
+    exg     d1,d3
+.x_no_swap:
+    ;
+    ; register allocation
+    ; d0 = color
+    ; d1 = x1fix
+    ; d2 = xpos - calculated
+    ; d3 = x1fix, next
+    ; d5 = dxdy
+    ;
+.y_loop_x_greater:
+    move.l  d1, d2
+    asr.l   d7, d2
+
+    move.l  d3, d6
+    asr.l   d7, d6
+    sub.l   d2, d6
+.ylx:
+    move.b  d0,(a3,d2.l)
+    addq.l  #1,d2
+    subq.l  #1,d6
+    bne     .ylx
+
+    add.l   goa_pixmap_width(a0),a3
+    add.l   d5, d1
+    add.l   d5, d3
+    subq.l  #1, d4
+    bne     .y_loop_x_greater
+
+
+    pop     d2-d7/a1-a3
+    rts
+
+.y_greater:
+    ;; need to restore this, if negated - better just recalculate
+    move.l  d3, d5
+    sub.l   d1, d5
+
+    ;
+    ; d5 = dxfix
+    ; d6 = dyfix
+
+    move.l  d6, d4  ; d4 used as loop register
+    asr.l   d7, d4
+
+
+    asl.l   d7, d5
+    divs.l  d6, d5  
+    ;
+    ; d5 = dxdyfix
+    ;
+    asr.l   d7, d2
+    move.l  goa_pixmap_image(a0),a3
+    mulu.l  goa_pixmap_width(a0),d2
+    add.l   d2, a3
+    ;
+    ; register allocation
+    ; d0 = color
+    ; d1 = x1fix
+    ; d2 = xpos - calculated
+    ; d3
+    ; d5 = dxdy
+    ;
+.y_loop_y_greater:
+    move.l  d1, d2
+    asr.l   d7, d2
+    move.b  d0,(a3,d2.l)
+    add.l   goa_pixmap_width(a0),a3
+    add.l   d5, d1
+    subq.l  #1, d4
+    bne     .y_loop_y_greater
+
+
+.out:
+    pop     d2-d7/a1-a3
+    rts
+
+_fp10_drawline_old:
+
+    ;; __regsused in VBCC doesn't work, manually pushing instead
+    push    d2-d7/a1
+
+
+    move.l  #FIX_10_BITS,d7
+
+    move.l  (a1)+,d0
+    move.l  (a2)+,d2
+    move.l  (a1)+,d1
+    move.l  (a2)+,d3
+
+    move.l  d2, d4
+    move.l  d3, d5
+    sub.l   d0, d4  ;; dx, d4 = d2 - d0
+
+
+    bpl     .x_positive ;; can do bpl.b +2, as neg.l d4 is two bytes
+    neg.l  d4
+.x_positive:
+
+    sub.l   d1, d5  ;; dy, d5 = d3 - d1
+    bpl     .y_positive
+    neg.l   d5
+.y_positive:
+    cmp.l   d5, d4  ;; abs(dx) > abs(dy)
+    bgt     .x_greater  
+    ;; TODO dy == 0, leave
+    cmp.l   d1, d3  ;; p1[1] > p2[2]
+    bgt     .y2_greater
+    exg     d0,d2       ;; swap x1 <-> x2
+    exg     d1,d3       ;; swap y1 <-> y2
+.y2_greater:
+    asr.l   d7, d0
+    sub.l   d1, d5  ;; dy, d5 = d3 - d1
+    asr.l   d7, d2
+
+    sub.l   d0, d2      ; d2 = dx, loop register
+
+
+    ; register allocation
+    ; d0 = x1
+    ; d1 = y1
+    ; d2 = x2
+    ; d3 = y2
+    ;
+    move.l  d1, d4
+    sub.l   d3, d4
+    beq     .out_y
+
+    move.l  d0, d5
+    sub.l   d2, d5
+    ;;
+    ;; d5 == 0 -> vertical line
+    ;;
+    asl.l   d7, d4
+    divs.l  d5, d4
+    ;;
+    ;; d4 = dxdya
+    ;;
+
+    asr.l   d7, d1
+    move.l    goa_pixmap_image(a0), a1
+    mulu.l    goa_pixmap_width(a0), d1
+    add.l   d1, a1
+    ;;
+    ;; d0 = x1 (fix-point)
+    ;; 
+    ;; d4 = dx/dy
+    ;;
+    ;;
+
+.loop_y:
+    move.l  d0, d5          ;; this will not pipeline very well
+    asr.l   d7, d5
+    add.l   d4,d0
+    move.b  d6,(a1, d5.l)
+    add.l   goa_pixmap_width(a0), a1
+
+    subq.l  #1, d3
+    bne     .loop_y
+
+ .out_y:
+    ;;  restore and exist 
+    pop     d2-d7/a1
+    rts
+;
+;  dx > dy
+;
+.x_greater:
+    ;; make sure x2 > x1, we want dx positive
+    cmp     d0, d2  ;; x1 > x2
+    bgt     .noswap
+    ;; TODO: swap
+    exg     d0,d2       ;; swap x1 <-> x2
+    exg     d1,d3       ;; swap y1 <-> y2
+.noswap:
+    move.l  d2, d4
+
+    sub.l   d0, d4  ;; dx, d4 = d2 - d0
+    bne     .do_x   ;; dx == 0, leave (dx == dy == 0)
+    ;; restore and exist
+    pop     d2-d7/a1
+    rts
+
+.do_x:
+    move.l  d3, d5
+
+    asr.l   d7, d0
+    sub.l   d1, d5  ;; dy, d5 = d3 - d1
+    asr.l   d7, d2
+
+    sub.l   d0, d2      ; d2 = dx, loop register
+    beq     .out_x
+
+    asl.l   d7, d5
+    divs.l  d4, d5      ;; d5 = dy / dx
+    ;ext.l   d5
+
+    move.l    goa_pixmap_image(a0), a1
+    add.l     d0, a1      ;; smarter to use lea???
+    ;;
+    ;; d0 - x1 coord
+    ;; d1 - y1 coord
+    ;; d2 - x2 coord
+    ;; d3 - y2 coord
+    ;;
+    ;; d5 = dy/dx
+    ;;
+
+.loop_x:
+    move.l  d1, d4
+    asr.l   d7, d4
+    add.l   d5, d1        ;; try pipeline
+
+    mulu.l  goa_pixmap_width(a0), d4        ;; y * 320, 
+
+    move.b  d6, (a1, d4.l)    ;; store pixel
+                                ;; perhaps do "subq.l d2, 1"
+    addq    #1, a1
+    subq.l  #1, d2
+    bne     .loop_x
+.out_x:
+    ;; restore and exist
+    pop     d2-d7/a1
+    rts
+
+
+
+
+
+
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+; /////////////////////////////////////////////////////////////
+_fp_dumb_drawline:
+
+    ;; __regsused in VBCC doesn't work, manually pushing instead
+    push    d2-d7/a1
+
+    move.l  #FIX_10_BITS, d7
+
+    move.l  (a1)+,d0
+    move.l  (a2)+,d2
+    move.l  (a1)+,d1
+    move.l  (a2)+,d3
+
+    move.l  d2, d4
+    move.l  d3, d5
+    sub.l   d0, d4  ;; dx, d4 = d2 - d0
+
+
+    bpl     .x_positive ;; can do bpl.b +2, as neg.l d4 is two bytes
+    neg.l  d4
+.x_positive:
+    sub.l   d1, d5  ;; dy, d5 = d3 - d1
+    bpl     .y_positive
+    neg.l   d5
+.y_positive:
+
+    ;; abs(dx) > abs(dy)      - the above is due to this
+    cmp.l   d5, d4  
+    bgt     .x_greater  
+    ;; TODO dy == 0, leave
+    cmp.l   d1, d3  ;; p1[1] > p2[2]
+    bgt     .y2_greater
+    exg     d0,d2       ;; swap x1 <-> x2
+    exg     d1,d3       ;; swap y1 <-> y2
+.y2_greater:
+    move.l  d2, d4
+    move.l  d3, d5
+    
+    sub.l   d0, d4  ;; dx, d4 = d2 - d0
+    sub.l   d1, d5  ;; dy, d5 = d3 - d1
+        
+    asr.l   d7, d3
+    asr.l   d7, d1
+    sub.l   d1, d3      ; d3 = dy, loop register
+    beq     .out_y
+    asl.l   d7,d4
+    divs.l  d5, d4      ;; d4 = dx / dy    d4 = d4 / d5
+
+    mulu.l    goa_pixmap_width(a0), d1
+    move.l    goa_pixmap_image(a0), a1
+    add.l     d1, a1
+
+    ;;
+    ;; a0 = first scanline
+    ;; d0 = x1 (fix-point)
+    ;; d4 = y1 
+    ;; d4 = dx/dy
+    ;;
+
+.loop_y:
+    move.l  d0, d5          ;; this will not pipeline very well
+    asr.l   d7, d5
+    add.l   d4,d0
+    move.b  d6,(a1, d5.l)
+    add.l   goa_pixmap_width(a0), a1
+
+    subq.l  #1, d3
+    bne     .loop_y
+
+ .out_y:
+    ;;  restore and exist 
+    pop     d2-d7/a1
+    rts
+;
+;  dx > dy
+;
+.x_greater:
+    ; register allocation
+    ;
+    ;   d0 = x1
+    ;   d1 = y1
+    ;   d2 = x2
+    ;   d3 = y2
+    ;   d4 = dx
+    ;
+
+    ;; make sure x2 > x1, we want dx positive
+    cmp     d2, d0  ;; x1 > x2
+    bgt     .noswap
+    ;; TODO: swap
+    exg     d0,d2       ;; swap x1 <-> x2
+    exg     d1,d3       ;; swap y1 <-> y2
+.noswap:
+    move.l  d2, d4
+    move.l  d3, d5
+
+    sub.l   d0, d4  ;; dx, d4 = d2 - d0
+    bne     .do_x   ;; dx == 0, leave (dx == dy == 0)
+    ;; restore and exit
+    pop     d2-d7/a1
+    rts
+
+.do_x:
+
+    sub.l   d1, d5  ;; dy, d5 = d3 - d1
+
+    asr.l   d7, d2
+    asr.l   d7, d0
+
+    sub.l   d0, d2      ; d2 = dx, loop register
+    beq     .out_x
+
+    asl.l   d7, d5
+    divs.l  d4, d5      ;; d5 = dy / dx
+
+    move.l    goa_pixmap_image(a0), a1
+    add.l     d0, a1      ;; smarter to use lea???
+    ;;
+    ;; d0 - x1 coord
+    ;; d1 - y1 coord
+    ;; d2 - x2 coord
+    ;; d3 - y2 coord
+    ;;
+    ;; d5 = dy/dx
+    ;;
+
+.loop_x:
+    move.l  d1, d4
+    asr.l   d7, d4
+    add.l   d5, d1        ;; try pipeline
+
+    mulu.l  goa_pixmap_width(a0), d4        ;; y * 320, 
+    move.b  d6, (a1, d4.l)    ;; store pixel
+                                ;; perhaps do "subq.l d2, 1"
+    addq    #1, a1
+    subq.l  #1, d2
+    bne     .loop_x
+.out_x:
+    ;; restore and exist
+    pop     d2-d7/a1
+   
+    rts
 
 
 ; ------------------------------------
@@ -187,13 +700,9 @@ testpixmap:
 ; a3: v3, fp: 22:10
 ; a6: pointer to debug info (pf_xxx) result structure
 ;
-; NOTE: the number of FIX_POINT_BITS is critical, 6 is too low
 ;
-;
-; v1:     dc.l    160,  0, 0
-; v2:     dc.l    100, 80, 0
-; v3:     dc.l    110,140, 0
-;
+; Note: This can probably be optimized further, as we can also use address registers 
+;       for 'add.l' instruction in the inner loop - currently this is not done!
 ;
 ;
 ; ------------------------------------
@@ -208,6 +717,12 @@ _fp_poly_singlecolor:
     move.l vertex_y(a3), d3   
 
     lea     polydata, a6
+
+    ;; move the width of pixmap to poly-structure
+    ;; this is 'cache optimization' as we only want the pf_data structure to be accessed during 
+    ;; edge-loop interpolation
+    move.l  goa_pixmap_width(a0),a5
+    move.l  a5,pf_data_pmwidth(a6)
 
 
 ;    if (y1 > y2) {
@@ -424,14 +939,17 @@ _fp_poly_singlecolor:
     move.b  d0,(a5)+      ; this is 1 cycle slower then direct but pipeline is maintained
     subq.l  #1, d6
     bpl     .upper_right_y_scan
-;    move.b  d0,(a5)      ; this is 1 cycle slower then direct but pipeline is maintained
-;    move.b  d0,(a5,d6.l)      ; this is 1 cycle slower then direct but pipeline is maintained
+;;   this will just draw the edges!
+;    move.b  d0,(a5)      
+;    move.b  d0,(a5,d6.l)      
 
     ;; end of scanline here
 
     add.l   pf_data_dxdy1(a6),d4                   ;; xafix += dxdy1
     add.l   pf_data_dxdy2(a6),d5                   ;; xbfix += dxdy2      
-    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
+;    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
+    add.l   pf_data_pmwidth(a6),a4
+
     subq.l  #1,d7
     bne     .upper_right_y_triseg
 
@@ -506,7 +1024,9 @@ _fp_poly_singlecolor:
 
     add.l   pf_data_dxdy3(a6),d4                   ;; xafix += dxdy3
     add.l   pf_data_dxdy2(a6),d5                   ;; xbfix += dxdy2      
-    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
+    ;add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
+    add.l   pf_data_pmwidth(a6),a4
+
     subq.l  #1,d7
     bne     .lower_right_y_triseg   ;; BNE or BPL??????
 .skip_lower_right:
@@ -617,7 +1137,8 @@ _fp_poly_singlecolor:
     ;; advance left/right edges
     add.l   pf_data_dxdy1(a6),d4                   ;; right, xafix += dxdy1
     add.l   pf_data_dxdy2(a6),d5                   ;; left, xbfix += dxdy2      
-    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
+;    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
+    add.l   pf_data_pmwidth(a6),a4
 
     subq.l  #1,d7
     bne     .upper_left_y_triseg    ;; XXXXXXX - bpl gives one more pixel... 
@@ -683,7 +1204,9 @@ _fp_poly_singlecolor:
 
     add.l   pf_data_dxdy3(a6),d4                   ;; right, xafix += dxdy3
     add.l   pf_data_dxdy2(a6),d5                   ;; left xbfix += dxdy2      
-    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
+;    add.l   goa_pixmap_width(a0),a4                 ;; advance next scanline
+    add.l   pf_data_pmwidth(a6),a4
+
     subq.l  #1,d7
     bne     .lower_left_y_triseg
     ;; end triangle segment
@@ -944,6 +1467,10 @@ v1_right:     dc.l    160<<FIX_BITS,  0<<FIX_BITS, 0
 v2_right:     dc.l    100<<FIX_BITS, 80<<FIX_BITS, 0
 v3_right:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
 
+v1_right_fp10:     dc.l    160<<FIX_10_BITS,  0<<FIX_10_BITS, 0
+v2_right_fp10:     dc.l    100<<FIX_10_BITS, 80<<FIX_10_BITS, 0
+v3_right_fp10:     dc.l    110<<FIX_10_BITS,140<<FIX_10_BITS, 0
+
 ;
 ; xx_left, will cause long-edge in polyfiller to be left
 ;
@@ -951,6 +1478,10 @@ v3_right:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
 v1_left:     dc.l    160<<FIX_BITS,  0<<FIX_BITS, 0
 v2_left:     dc.l    180<<FIX_BITS, 80<<FIX_BITS, 0
 v3_left:     dc.l    110<<FIX_BITS,140<<FIX_BITS, 0
+
+v1_left_fp10:     dc.l    160<<FIX_10_BITS,  0<<FIX_10_BITS, 0
+v2_left_fp10:     dc.l    180<<FIX_10_BITS, 80<<FIX_10_BITS, 0
+v3_left_fp10:     dc.l    110<<FIX_10_BITS,110<<FIX_10_BITS, 0
 
 
 ;;
@@ -976,6 +1507,11 @@ v3_fail_c:     dc.l    $0a40, $2d4f, 0
 v1_fail_d:     dc.l    $3240, $2d40, 0
 v2_fail_d:     dc.l    $15de, $496f, 0
 v3_fail_d:     dc.l    $0a40, $2d1c, 0
+
+; line fp10 crash:
+v1_fp10_fail_a:     dc.l    160 << FIX_10_BITS, 90  << FIX_10_BITS, 0
+v2_fp10_fail_a:     dc.l    234 << FIX_10_BITS, 121  << FIX_10_BITS, 0
+v3_fp10_fail_a:     dc.l    190  << FIX_10_BITS, 164  << FIX_10_BITS, 0
 
 
 pf_debug_data: ds.b     4*32
