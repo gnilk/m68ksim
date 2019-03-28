@@ -157,22 +157,11 @@ test:
 ;    bsr     _fp_poly_singlecolor
 
     lea     backbuffer,a0
-    lea     v1_left_fp10,a1
-    lea     v2_left_fp10,a2
+    lea     v1_fp10_fail_b,a1
+    lea     v2_fp10_fail_b,a2
     move.l  #255,d0
     bsr     _fp10_drawline
 
-    lea     backbuffer,a0
-    lea     v2_left_fp10,a1
-    lea     v3_left_fp10,a2
-    move.l  #255,d0
-    bsr     _fp10_drawline
-
-    lea     backbuffer,a0
-    lea     v3_left_fp10,a1
-    lea     v1_left_fp10,a2
-    move.l  #255,d0
-    bsr     _fp10_drawline
 
 
 
@@ -274,7 +263,8 @@ _fp10_drawline:
 
     move.l  d6, d4  ; d4 used as loop register
     asr.l   d7, d4
-
+    ; TODO: horizontal!!!
+    beq     .out
 
     asl.l   d7, d5
     divs.l  d6, d5  
@@ -1510,8 +1500,13 @@ v3_fail_d:     dc.l    $0a40, $2d1c, 0
 
 ; line fp10 crash:
 v1_fp10_fail_a:     dc.l    160 << FIX_10_BITS, 90  << FIX_10_BITS, 0
-v2_fp10_fail_a:     dc.l    234 << FIX_10_BITS, 121  << FIX_10_BITS, 0
-v3_fp10_fail_a:     dc.l    190  << FIX_10_BITS, 164  << FIX_10_BITS, 0
+v2_fp10_fail_a:     dc.l    240 << FIX_10_BITS, 91  << FIX_10_BITS, 0
+v3_fp10_fail_a:     dc.l    216  << FIX_10_BITS, 147  << FIX_10_BITS, 0
+
+; crashes the special fp10 drawer - pre multiplied by test program
+v1_fp10_fail_b:     dc.l    $28200, $16a00, 0
+v2_fp10_fail_b:     dc.l    $3c1fb, $16d30, 0
+v3_fp10_fail_b:     dc.l    $36201, $24e84, 0
 
 
 pf_debug_data: ds.b     4*32
