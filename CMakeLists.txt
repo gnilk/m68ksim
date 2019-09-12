@@ -117,7 +117,7 @@ if (DO_BUILD_GLFW)
 	add_subdirectory(dep/glfw)
 	set(GLFW glfw)
 else()
-	find_library(GLFW NAMES libglfw3.a PATHS)
+	find_library(GLFW NAMES libglfw.dylib PATHS)
 endif()
 
 message(STATUS "Cocoa Framework path: ${COCOA_FRAMEWORK}")
