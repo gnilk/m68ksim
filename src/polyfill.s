@@ -117,27 +117,15 @@ pf_data_pmwidth      rs.l 1
 pf_data_prestep      rs.l 1
 pf_data_prestep_down rs.l 1
 
+    rsreset
+pix_xpos    rs.l    1
+pix_ypos    rs.l    1
+pix_col     rs.l    1
 
 
     section code
 
 test:
-    nop
-;    move.l  #320,d3
-    move.l  #2,d3
-    move.l  #16,d0
-    ;asl.l   d0,d3
-    ;move.l  #$01020304,d1
-;    move.l  #$0304,d1
- ;   move.l  #$0102,d2
-    move.l #0,d1
-    move.l #10, d2
-;    move.l  d1,d2
-;    asr.l   d0,d2
-    asl.l   d0,d1
-
-    divs.l    d3, d2:d1
-
 
     ;
     ; I simply don't know how to autofill the pointer to the buffer in asm
@@ -147,6 +135,10 @@ test:
     lea     backbuffer,a0
     lea     backbuffer_image_data,a1
     move.l  a1, goa_pixmap_image(a0)
+    lea     pixelarray_i3v_cliptest,a1
+    move.l  #4+32, d6
+    bsr     _gnk_puxpixels_3iv
+
     
 ;    move.l  #255,d0
 ;    lea     backbuffer,a0
@@ -156,11 +148,12 @@ test:
 ;    lea     pf_debug_data, a6
 ;    bsr     _fp_poly_singlecolor
 
-    lea     backbuffer,a0
-    lea     v1_fp10_fail_b,a1
-    lea     v2_fp10_fail_b,a2
-    move.l  #255,d0
-    bsr     _fp10_drawline
+;    lea     backbuffer,a0
+;    lea     h1_a,a1
+;    lea     h2_a,a2
+;    move.l  #255,d0
+;    move.l  #255,d6
+;    bsr     _fp_drawline
 
 
 
@@ -189,6 +182,31 @@ testpixmap:
     bne     .loop
     rts
 
+
+_gnk_puxpixels_3iv:
+    push    d2-d3/a2
+    move.l  goa_pixmap_width(a0),d3
+    move.l  goa_pixmap_image(a0),a2
+.loop
+    move.l  pix_ypos(a1),d1
+    bmi     .next
+    move.l  pix_xpos(a1),d0
+    bmi     .next
+    cmp.l   goa_pixmap_height(a0),d1
+    bge     .next
+    cmp.l   goa_pixmap_width(a0),d0
+    bge     .next
+
+    mulu.l  d3,d1
+    move.l  pix_col(a1),d2
+    add.l   d1,d0
+    move.b  d2, (a2, d0.l)
+.next:
+    add.l   #3*4,a1
+    subq.l  #1, d6
+    bne     .loop
+    pop     d2-d3/a2
+    rts
 
 ;
 ; d0 - color
@@ -506,6 +524,158 @@ _fp10_drawline_old:
     pop     d2-d7/a1
     rts
 
+
+
+; ------------------------------------
+;
+; fp_drawline - DDA Line Drawer (without anything fancy)
+;
+;   a0: goa_pixmap
+;   a1: p1 coordinate [x,y] values -> 32bit
+;   a2: p2 coordinate [x,y] values -> 32bit
+;
+; Considering keeping it fixpoint to this level!!
+; We need some info in order to do subpixeling and stuff
+;
+; TODO:
+;    - Make interface compatible with GOA
+;      void drawline(GOA_PIXMAP8 *pixmap, float *p1, float *p2, int size, void *context)
+;    - Need to figure out how to declare a struct
+;   
+;
+_fp_drawline:
+
+    ;; __regsused in VBCC doesn't work, manually pushing instead
+    push    d2-d6/a1-a2
+
+
+    move.l  (a1)+,d0
+    move.l  (a2)+,d2
+    move.l  (a1)+,d1
+    move.l  (a2)+,d3
+
+    move.l  d2, d4
+    move.l  d3, d5
+    sub.l   d0, d4  ;; dx, d4 = d2 - d0
+
+
+    bpl     .x_positive ;; can do bpl.b +2, as neg.l d4 is two bytes
+    neg.l  d4
+.x_positive:
+
+    sub.l   d1, d5  ;; dy, d5 = d3 - d1
+    bpl     .y_positive
+    neg.l   d5
+.y_positive:
+    cmp.l   d5, d4  ;; abs(dx) > abs(dy)
+    bgt     .x_greater  
+    ;; TODO dy == 0, leave
+    cmp.l   d1, d3  ;; p1[1] > p2[2]
+    bgt     .y2_greater
+    exg     d0,d2       ;; swap x1 <-> x2
+    exg     d1,d3       ;; swap y1 <-> y2
+.y2_greater:
+    move.l  d2, d4
+    move.l  d3, d5
+    
+    sub.l   d0, d4  ;; dx, d4 = d2 - d0
+    sub.l   d1, d5  ;; dy, d5 = d3 - d1
+        
+
+    asr.l   #8, d3
+    asr.l   #8, d1
+
+    sub.l   d1, d3      ; d3 = dy, loop register
+    beq     .out_y
+
+    asl.l   #8, d4
+    divs.l  d5, d4      ;; d4 = dx / dy
+
+    mulu.l    goa_pixmap_width(a0), d1
+    move.l    goa_pixmap_image(a0), a1
+
+    add.l   d1, a1
+    ;;
+    ;; d0 = x1 (fix-point)
+    ;; 
+    ;; d4 = dx/dy
+    ;;
+    ;;
+
+.loop_y:
+    move.l  d0, d5          ;; this will not pipeline very well
+    asr.l   #8, d5
+    add.l   d4,d0
+    move.b  d6,(a1, d5.l)
+    add.l   goa_pixmap_width(a0), a1
+
+    subq.l  #1, d3
+    bne     .loop_y
+
+ .out_y:
+    ;;  restore and exist 
+    pop     d2-d6/a1-a2
+    rts
+;
+;  dx > dy
+;
+.x_greater:
+    ;; make sure x2 > x1, we want dx positive
+    cmp.l   d0, d2  ;; x1 > x2
+    bgt     .noswap
+    ;; TODO: swap
+    exg     d0,d2       ;; swap x1 <-> x2
+    exg     d1,d3       ;; swap y1 <-> y2
+.noswap:
+    move.l  d2, d4
+    move.l  d3, d5
+
+    sub.l   d0, d4  ;; dx, d4 = d2 - d0
+    bne     .do_x   ;; dx == 0, leave (dx == dy == 0)
+    ;; restore and exist
+    pop     d2-d6/a1-a2
+    rts
+
+.do_x:
+
+    sub.l   d1, d5  ;; dy, d5 = d3 - d1
+
+    asr.l   #8, d0
+    asr.l   #8, d2
+
+    sub.l   d0, d2      ; d2 = dx, loop register
+    beq     .out_x
+
+    asl.l   #8, d5
+    divs.l  d4, d5      ;; d5 = dy / dx
+
+    move.l    goa_pixmap_image(a0), a1
+    add.l     d0, a1      ;; smarter to use lea???
+    ;;
+    ;; d0 - x1 coord
+    ;; d1 - y1 coord
+    ;; d2 - x2 coord
+    ;; d3 - y2 coord
+    ;;
+    ;; d5 = dy/dx
+    ;;
+
+.loop_x:
+    move.l  d1, d4
+    asr.l   #8, d4
+    add.l   d5, d1        ;; try pipeline
+
+    mulu.l  goa_pixmap_width(a0), d4        ;; y * 320, 
+
+    move.b  d6, (a1, d4.l)    ;; store pixel
+                                ;; perhaps do "subq.l d2, 1"
+    addq    #1, a1
+    subq.l  #1, d2
+    bne     .loop_x
+.out_x:
+    ;; restore and exist
+    pop     d2-d6/a1-a2
+    rts
 
 
 
@@ -1474,6 +1644,7 @@ v2_left_fp10:     dc.l    180<<FIX_10_BITS, 80<<FIX_10_BITS, 0
 v3_left_fp10:     dc.l    110<<FIX_10_BITS,110<<FIX_10_BITS, 0
 
 
+
 ;;
 ;; test cases that have failed
 ;;
@@ -1508,6 +1679,9 @@ v1_fp10_fail_b:     dc.l    $28200, $16a00, 0
 v2_fp10_fail_b:     dc.l    $3c1fb, $16d30, 0
 v3_fp10_fail_b:     dc.l    $36201, $24e84, 0
 
+
+h1_a:   dc.l 319 << FIX_BITS, 80 << FIX_BITS, 0
+h2_a:   dc.l 0 << FIX_BITS, 80 << FIX_BITS, 0
 
 pf_debug_data: ds.b     4*32
 
@@ -1585,6 +1759,51 @@ p2:
     dc.l    193, 67
     dc.l    196, 74
     dc.l    199, 82
+
+
+; 3 value (x,y,col) pixel array
+pixelarray_i3v_cliptest:    
+    dc.l    160, -10,255
+    dc.l    160, 400,255
+    dc.l    -10, 90,255
+    dc.l    350, 97,255
+
+
+; 3 value (x,y,col) pixel array
+pixelarray_i3v:    
+    dc.l    200, 90,255
+    dc.l    199, 97,255
+    dc.l    196, 105,255
+    dc.l    193, 112,255
+    dc.l    188, 118,255
+    dc.l    182, 123,255
+    dc.l    175, 126,255
+    dc.l    167, 129,255
+    dc.l    160, 130,255
+    dc.l    152, 129,255
+    dc.l    144, 126,255
+    dc.l    137, 123,255
+    dc.l    131, 118,255
+    dc.l    126, 112,255
+    dc.l    123, 105,255
+    dc.l    120, 97,255
+    dc.l    120, 90,255
+    dc.l    120, 82,255
+    dc.l    123, 74,255
+    dc.l    126, 67,255
+    dc.l    131, 61,255
+    dc.l    137, 56,255
+    dc.l    144, 53,255
+    dc.l    152, 50,255
+    dc.l    160, 50,255
+    dc.l    167, 50,255
+    dc.l    175, 53,255
+    dc.l    182, 56,255
+    dc.l    188, 61,255
+    dc.l    193, 67,255
+    dc.l    196, 74,255
+    dc.l    199, 82,255
+
 
 
 backbuffer_image_data:  ds.b 320*180

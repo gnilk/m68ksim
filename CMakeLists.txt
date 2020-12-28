@@ -39,7 +39,9 @@ list(APPEND srcsim_con src/sim.cpp)
 list(APPEND srcgen src/m68kmake.c)
 
 # assembler source
-list(APPEND srcasm src/polyfill.s)
+#list(APPEND srcasm src/polyfill.s)
+#list(APPEND srcasm src/vpol.s)
+list(APPEND srcasm src/bmerge.s)
 
 list(APPEND imguisrc dep/imgui/imgui.cpp)
 list(APPEND imguisrc dep/imgui/imgui_widgets.cpp)
@@ -82,7 +84,23 @@ add_custom_command(
 		DEPENDS ${srcasm}
 		VERBATIM)
 
-add_custom_target(dummy DEPENDS polyfill.exe)
+add_custom_command(
+		OUTPUT vpol.exe
+		WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}		
+		COMMAND vasmm68k_mot -phxass -m68060 -Fhunk -linedebug -o ${CMAKE_CURRENT_BINARY_DIR}/vpol.o ${srcasm}
+		COMMAND vlink -o ${CMAKE_CURRENT_BINARY_DIR}/vpol.exe ${CMAKE_CURRENT_BINARY_DIR}/vpol.o
+		DEPENDS ${srcasm}
+		VERBATIM)
+
+add_custom_command(
+		OUTPUT bmerge.exe
+		WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}		
+		COMMAND vasmm68k_mot -phxass -m68060 -Fhunk -linedebug -o ${CMAKE_CURRENT_BINARY_DIR}/bmerge.o ${srcasm}
+		COMMAND vlink -o ${CMAKE_CURRENT_BINARY_DIR}/bmerge.exe ${CMAKE_CURRENT_BINARY_DIR}/bmerge.o
+		DEPENDS ${srcasm}
+		VERBATIM)
+
+add_custom_target(dummy DEPENDS bmerge.exe)
 
 #
 # Debugger UI

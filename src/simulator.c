@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <time.h>
+#include <strings.h>
 
 #include "m68k.h"
 #include "simulator.h"

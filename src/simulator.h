@@ -22,8 +22,8 @@ extern "C" {
 #define OUTPUT_DEVICE_PERIOD 1
 
 /* ROM and RAM sizes */
-#define MAX_ROM (256*1024)
-#define MAX_RAM (256*1024)
+#define MAX_ROM (512*1024)
+#define MAX_RAM (512*1024)
 
 
 /* Read/write macros */

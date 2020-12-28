@@ -29,7 +29,7 @@
 static ImVec4 line_col(0.6f,0.2f,0.2f,1.0f);
 
 
-#define MAX_PC_HISTORY 16
+#define MAX_PC_HISTORY 48
 
 typedef struct
 {
@@ -110,7 +110,12 @@ void gizmo(const char* str_id, ImVec2 &pos, float radius, ImVec2 &minpos, ImVec2
 
 // Memory texture properties
 static GLuint memoryTextureID;
-static void *textureBuffer = NULL;
+// void *textureBuffer = NULL;
+
+static uint8_t rgba_texture[320*180*4];
+static uint8_t rgba_palette[256*4];
+static bool bHaveTexturePalette = false;
+
 static int textureScaling = 2;
 static uint32_t memoryTextureAddr = 0;
 
@@ -166,7 +171,7 @@ int AppInit(int argc, char **argv) {
     glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 
     // Must be configurable
-    textureBuffer = sim_romptr(memoryTextureAddr);
+    //textureBuffer = sim_romptr(memoryTextureAddr);
 
 
 
@@ -176,7 +181,10 @@ int AppInit(int argc, char **argv) {
 
 
 static void ShowMemoryDump() {
-    ImGui::Begin("MemoryView", nullptr, ImVec2(640,360));
+    ImGui::SetNextWindowSize(ImVec2(640,360));
+    ImGui::Begin("MemoryView");
+
+//    ImGui::Begin("MemoryView", nullptr, ImVec2(640,360));
     ImGui::Text("Memory from: $%.8x", memoryViewAddr);
 
     uint8_t *ptrRom = (uint8_t *)sim_ramptr(0);
@@ -195,19 +203,62 @@ static void ShowMemoryDump() {
 
 }
 
+
 static void ShowMemoryTexture() {
 //    IMGUI_API void          Image(ImTextureID user_texture_id, const ImVec2& size, const ImVec2& uv0 = ImVec2(0,0), const ImVec2& uv1 = ImVec2(1,1), const ImVec4& tint_col = ImVec4(1,1,1,1), const ImVec4& border_col = ImVec4(0,0,0,0));
 
-    textureBuffer = sim_ramptr(memoryTextureAddr);
+    if (!bHaveTexturePalette) {
+        for(int i=0;i<256;i++) {
+            rgba_palette[i*4+0] = i;
+            rgba_palette[i*4+1] = i;
+            rgba_palette[i*4+2] = i;
+            rgba_palette[i*4+3] = i;
+        }
+        bHaveTexturePalette = true;
+    }
+
+    //textureBuffer = sim_ramptr(memoryTextureAddr);
+    uint8_t *textureRam = (uint8_t*)sim_ramptr(memoryTextureAddr);
+
+    // Remap to RGBA according to palette..
+    for(int i=0;i<320*180;i++) {
+        uint8_t c = textureRam[i];
+        rgba_texture[i*4+0] = rgba_palette[c*4+0];
+        rgba_texture[i*4+1] = rgba_palette[c*4+1];
+        rgba_texture[i*4+2] = rgba_palette[c*4+2];
+        rgba_texture[i*4+3] = 255;
+    }
 
     glBindTexture(GL_TEXTURE_2D, memoryTextureID);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, 320, 180, 0, GL_RED, GL_UNSIGNED_BYTE, textureBuffer);
+//    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, 320, 180, 0, GL_RED, GL_UNSIGNED_BYTE, textureBuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 320, 180, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba_texture);
 
     ImTextureID id = (ImTextureID)memoryTextureID;
-    ImGui::Begin("MemoryTexture", nullptr, ImVec2(640,360));
+//    ImGui::SetNextWindowSize(ImVec2(640,380));
+    //ImGui::SetNextWindowSizeConstraints()    
+    ImGui::Begin("MemoryTexture");
+//    ImGui::Begin("MemoryTexture", nullptr, ImVec2(640,360));
     ImGui::Text("Memory from: $%.8x [scale: x%d]", memoryTextureAddr, textureScaling);
     // Scaling options???
     ImGui::Image((void*)memoryTextureID, ImVec2(320 * textureScaling,180 * textureScaling));
+
+    ImGui::Text("Palette (use: lp <file> to load)");
+
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    for (int n = 0; n < 256; n++)
+    {
+        ImGui::PushID(n);
+        if ((n % 32) != 0) {
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.y);
+        }
+        ImVec4 col={rgba_palette[n*4+0]/256.0f,rgba_palette[n*4+1]/256.0f,rgba_palette[n*4+2]/256.0f,1};
+        ImGui::ColorButton("##palette", col, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoTooltip, ImVec2(16,16));
+
+        ImGui::PopID();
+    }
+    ImGui::PopStyleVar(1);
+
+
     ImGui::End();
 }
 
@@ -218,7 +269,10 @@ static void ShowStack() {
     uint32_t stackCurrent = sim_stack_addr();
     uint32_t stack_top = sim_stack_top();
 
-    ImGui::Begin("Stack", nullptr, ImVec2(180,360));
+    ImGui::SetNextWindowSize(ImVec2(180,360));
+    ImGui::Begin("Stack");
+    //ImGui::Begin("Stack", nullptr, ImVec2(180,360));
+
     ImGui::Text("Stack at: $%.8x", sim_stack_addr());
     while(stackCurrent < stack_top) {
         uint32_t v = cpu_read_long(stackCurrent); //0x0003fffc);
@@ -234,7 +288,10 @@ static void ShowRegisters() {
 
     regs->Print(data, addr);
 
-    ImGui::Begin("Registers", nullptr, ImVec2(400,200));
+    ImGui::SetNextWindowSize(ImVec2(400,200));
+    ImGui::Begin("Registers");
+
+    //ImGui::Begin("Registers", nullptr, ImVec2(400,200));
     ImGui::Columns(2);
     for(int i=0;i<data.size();i++) {
         ImGui::Text("%s",data[i].c_str());
@@ -286,6 +343,18 @@ static void LoadHunkFile(std::string filename) {
     consoleBuffer.Printf("Ok, new file loaded: %s", filename.c_str());
 
 }
+
+static bool LoadMemoryTexturePalette(std::string filename) {
+    consoleBuffer.Printf("Ok, new palette loaded: %s\n", filename.c_str());
+    FILE *f = fopen(filename.c_str(), "r");
+    if (f == NULL) {
+        return false;
+    }
+    fread(rgba_palette, 4 * 256, 1, f);
+    fclose(f);
+    return true;
+}
+
 
 static char *num2bin(unsigned int num, char *buffer, int maxlen) {
     int idxStart = 0;
@@ -435,6 +504,18 @@ static void ParseCommands(std::vector<std::string> &args) {
         return;
     } 
 
+    if (args[0] == std::string("lp")) {
+        if (args.size() != 2) {
+            consoleBuffer.Printf("Error: Wrong number of arguments!\n");
+            consoleBuffer.Printf("Use: lp <value>!\n");
+            return;
+        }
+        if (!LoadMemoryTexturePalette(args[1])) {
+            consoleBuffer.Printf("Error: Unable to load '%s'\n", args[1].c_str());
+        }
+        return;
+    }
+
     if (args[0] == std::string("?")) {
         consoleBuffer.Printf("<ret>          step (execute one instruction)\n");
         consoleBuffer.Printf("rt <sym/addr>  Run to symbol or address\n");
@@ -444,6 +525,7 @@ static void ParseCommands(std::vector<std::string> &args) {
         consoleBuffer.Printf("mt <sym/addr>  Memory Texture at address or Symbol\n");
         consoleBuffer.Printf("<expr>         Solve the expression, like: 4+4\n");
         consoleBuffer.Printf("---- Not well tested stuff\n");
+        consoleBuffer.Printf("lp <file>      Load Palette for memory texture\n");
         consoleBuffer.Printf("o <file>       LoadHunkFile\n");
         consoleBuffer.Printf("sym            List symbols (not implemented)\n");
 
@@ -496,12 +578,24 @@ static void StepExecution() {
     // This will restore focus to input box
     tLastActive = 0;
 }
+static void ShowHistoryBuffer() {
+    //ImGui::SetNextWindowSize(ImVec2(640,200));
+    ImGui::Begin("History Buffer");
+    for (int i=0;i<consoleBuffer.history.size();i++) {
+        ImGui::Text("%s",consoleBuffer.history[i].c_str());    
+    }
+    ImGui::End();
+}
 
 static void ShowMainWindow() {
     std::vector<std::string> disasm;
 
     history->Disasm(disasm);
-    ImGui::Begin("Disasm", nullptr, ImVec2(1200,800));
+    //ImGui::SetNextWindowSize(ImVec2(640,800));
+    ImGui::Begin("Disasm");
+    
+
+    //ImGui::Begin("Disasm", nullptr, ImVec2(1200,800));
 
     if (ImGui::InputText("Cmd", cmdbuffer, IM_ARRAYSIZE(cmdbuffer), ImGuiInputTextFlags_EnterReturnsTrue)) {
         printf("Process command: %s\n", cmdbuffer);
@@ -511,19 +605,6 @@ static void ShowMainWindow() {
         cmdbuffer[0]='\0';
     }
 
-    if (runToPCEquals > 0) {
-        uint32_t pcCurrent = m68k_get_reg(NULL, M68K_REG_PC);
-        // Finished???
-        if (pcCurrent == runToPCEquals) {
-            runToPCEquals = 0;
-            // Refill history buffer from new position
-            history->FillFrom(m68k_get_reg(NULL, M68K_REG_PC));
-        } else {
-            //printf("RT, current: %.8x, dst: %.8x\n", pcCurrent, runToPCEquals);
-            StepExecution();
-        }
-
-    } 
     ImGui::SetItemDefaultFocus();
     if (ImGui::IsWindowFocused()) {
         if (!ImGui::IsItemActive()) {
@@ -538,6 +619,23 @@ static void ShowMainWindow() {
     }
 
 
+    ImGuiWindowFlags window_flags = 0; //ImGuiWindowFlags_HorizontalScrollbar | (disable_mouse_wheel ? ImGuiWindowFlags_NoScrollWithMouse : 0);
+//    ImGui::BeginChild("ChildL", ImVec2(ImGui::GetWindowContentRegionWidth() * 0.5f, 260), false, window_flags);
+    ImGui::BeginChild("ChildL", ImVec2(ImGui::GetWindowContentRegionWidth(), ImGui::GetWindowContentRegionWidth()), true, window_flags);
+
+    if (runToPCEquals > 0) {
+        uint32_t pcCurrent = m68k_get_reg(NULL, M68K_REG_PC);
+        // Finished???
+        if (pcCurrent == runToPCEquals) {
+            runToPCEquals = 0;
+            // Refill history buffer from new position
+            history->FillFrom(m68k_get_reg(NULL, M68K_REG_PC));
+        } else {
+            //printf("RT, current: %.8x, dst: %.8x\n", pcCurrent, runToPCEquals);
+            StepExecution();
+        }
+    } 
+
     for(int i=0;i<disasm.size();i++) {
         if (IsComment(disasm[i])) {
             ImGui::TextColored(ImColor(128,128,128), "%s", disasm[i].c_str());
@@ -545,13 +643,14 @@ static void ShowMainWindow() {
             ImGui::TextColored(ImColor(255,255,255), "%s",disasm[i].c_str());
         }
     }
-    ImGui::Separator();
-    for (int i=0;i<consoleBuffer.history.size();i++) {
-        ImGui::Text("%s",consoleBuffer.history[i].c_str());    
-    }
     
+
+    ImGui::EndChild();
+
     ImGui::End();   
 }
+
+
 
 static TextEditor editor;
 static const char* fileToEdit = "../src/hello.s";
@@ -577,6 +676,7 @@ void AppRun()
     ShowStack();
     ShowMemoryDump();
     ShowMainWindow();
+    ShowHistoryBuffer();
     // Create a small window containing editable parameters.
     // ImGui::Begin("Parameters",nullptr,ImVec2(200,400));
     // ImGui::InputScalar("Scale", ImGuiDataType_U32, &scale);
